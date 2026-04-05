@@ -82,6 +82,10 @@
     trotzdem als verwertbar gilt und HandBrakeCLI gestartet wird (Standard: 500).
     Dateien unterhalb dieser Größe gelten bei MakeMKV-Fehlern als unbrauchbar.
 
+.PARAMETER Status
+    Gibt den aktuellen Status aus (Dienst, Laufwerk, aktive Prozesse, Archiv-Übersicht)
+    und beendet das Skript. Kein Rippen oder Kodieren.
+
 .PARAMETER Config
     Pfad zu einer JSON-Konfig-Datei. Alle dort definierten Parameter werden als
     Standardwerte verwendet. Explizit per CLI übergebene Parameter haben Vorrang.
@@ -104,7 +108,7 @@ param(
     [string]$DiscTitle = "",
 
     [Parameter(Mandatory = $false)]
-    [int]$DriveIndex = 0,
+    [int[]]$DriveIndex = @(0),
 
     [Parameter(Mandatory = $false)]
     [int]$MinLength = 1800,
@@ -161,7 +165,10 @@ param(
     [int]$PollInterval = 5,
 
     [Parameter(Mandatory = $false)]
-    [int]$MinMkvSizeMB = 500
+    [int]$MinMkvSizeMB = 500,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Status
 )
 
 Set-StrictMode -Version Latest
@@ -170,7 +177,7 @@ $ErrorActionPreference = "Stop"
 # ---------------------------------------------------------------------------
 # Version
 # ---------------------------------------------------------------------------
-$Script:Version          = "1.1"
+$Script:Version          = "1.3"
 
 # ---------------------------------------------------------------------------
 # Interne Variablen
@@ -185,7 +192,7 @@ $Script:LastDiscTitle    = ""       # zuletzt verarbeiteter Disc-Titel (für Ser
 # ---------------------------------------------------------------------------
 # Konfig-Datei laden (falls angegeben; CLI-Parameter haben Vorrang)
 # ---------------------------------------------------------------------------
-if ($Config -eq "") {
+if ($Config -eq "" -and $PSBoundParameters.Count -eq 0) {
     $autoConfig = Join-Path (Get-Location).Path "$Script:ScriptName.json"
     if (Test-Path $autoConfig) {
         $Config = $autoConfig
@@ -211,7 +218,7 @@ if ($Config -ne "") {
             switch ($key) {
                 "OutputDir"      { $script:OutputDir      = [string]$val }
                 "DiscTitle"      { $script:DiscTitle      = [string]$val }
-                "DriveIndex"     { $script:DriveIndex     = [int]$val }
+                "DriveIndex"     { $script:DriveIndex     = @($val | ForEach-Object { [int]$_ }) }
                 "MinLength"      { $script:MinLength      = [int]$val }
                 "HBPreset"       { $script:HBPreset       = [string]$val }
                 "HBQuality"      { $script:HBQuality      = [int]$val }
@@ -236,7 +243,7 @@ if ($Config -ne "") {
     }
 }
 
-if ($OutputDir -eq "") {
+if ($OutputDir -eq "" -and -not $Status) {
     Write-Host "[ERROR] -OutputDir ist Pflicht – entweder als Parameter oder in der Konfig-Datei." -ForegroundColor Red
     exit 1
 }
@@ -416,26 +423,31 @@ function Invoke-ExternalProcess {
         return @{ ExitCode = $exitCode; Output = $outLines.ToArray(); Errors = $errLines.ToArray() }
     }
 
-    # Standard: gepuffert über Temp-Dateien
-    $tmpOut = [System.IO.Path]::GetTempFileName()
-    $tmpErr = [System.IO.Path]::GetTempFileName()
+    # Standard: gepuffert, kein Konsolenfenster (CreateNoWindow verhindert Console-Vererbung)
+    $psi2 = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi2.FileName               = $Executable
+    $psi2.Arguments              = $Arguments -join ' '
+    $psi2.RedirectStandardOutput = $true
+    $psi2.RedirectStandardError  = $true
+    $psi2.UseShellExecute        = $false
+    $psi2.CreateNoWindow         = $true
 
-    try {
-        $proc = Start-Process `
-            -FilePath $Executable `
-            -ArgumentList ($Arguments -join ' ') `
-            -RedirectStandardOutput $tmpOut `
-            -RedirectStandardError  $tmpErr `
-            -NoNewWindow `
-            -PassThru `
-            -Wait
+    $proc2 = [System.Diagnostics.Process]::new()
+    $proc2.StartInfo = $psi2
+    $proc2.Start() | Out-Null
 
-        $outLines = @(Get-Content $tmpOut -Encoding UTF8 -ErrorAction SilentlyContinue)
-        $errLines = @(Get-Content $tmpErr -Encoding UTF8 -ErrorAction SilentlyContinue)
-        $exitCode = $proc.ExitCode
-    } finally {
-        Remove-Item $tmpOut, $tmpErr -ErrorAction SilentlyContinue
-    }
+    # Beide Streams async lesen, um Deadlocks zu vermeiden
+    $outTask = $proc2.StandardOutput.ReadToEndAsync()
+    $errTask = $proc2.StandardError.ReadToEndAsync()
+    $proc2.WaitForExit()
+
+    $outText  = $outTask.Result
+    $errText  = $errTask.Result
+    $exitCode = $proc2.ExitCode
+    $proc2.Dispose()
+
+    $outLines = @($outText -split "`r?`n" | Where-Object { $_ -ne '' })
+    $errLines = @($errText -split "`r?`n" | Where-Object { $_ -ne '' })
 
     foreach ($l in $outLines) {
         if ($l) { Write-Log "DEBUG" "  [STDOUT] $l" }
@@ -514,6 +526,7 @@ function Sanitize-FolderName {
 # Hauptlogik
 # ---------------------------------------------------------------------------
 function Main {
+    param([int]$DriveIdx = $DriveIndex[0])
 
     # 1. Log initialisieren
     Initialize-Log
@@ -548,10 +561,10 @@ function Main {
     # 3. Disc-Titel bestimmen
     $folderName = $DiscTitle
     if (-not $folderName -and -not $SkipRip -and -not $SkipDiscScan) {
-        $detectedTitle = Get-DiscTitle -MkvCon $MakeMKVPath -Index $DriveIndex
+        $detectedTitle = Get-DiscTitle -MkvCon $MakeMKVPath -Index $DriveIdx
         if ($null -eq $detectedTitle) {
             # Get-DiscTitle hat $null zurückgegeben = kein Disc / unlesbar
-            Send-TelegramMessage "DVD-Import FEHLER: Kein Disc in Laufwerk $DriveIndex erkannt."
+            Send-TelegramMessage "DVD-Import FEHLER: Kein Disc in Laufwerk $DriveIdx erkannt."
             $Script:ExitCode = 2
             return
         }
@@ -689,7 +702,7 @@ function Main {
                 "--noscan",
                 "--directio=false",
                 "mkv",
-                "disc:$DriveIndex",
+                "disc:$DriveIdx",
                 "all",
                 "`"$ripDir`"",
                 "--minlength=$MinLength"
@@ -823,6 +836,103 @@ function Main {
 }
 
 # ---------------------------------------------------------------------------
+# Status-Anzeige
+# ---------------------------------------------------------------------------
+function Show-Status {
+    $line = "=" * 56
+    Write-Host $line -ForegroundColor Cyan
+    Write-Host "  DVDRip v$Script:Version  –  Status" -ForegroundColor Cyan
+    Write-Host $line -ForegroundColor Cyan
+    Write-Host ""
+
+    # ── Dienst / Prozesse ────────────────────────────────────────────────────
+    Write-Host "  DIENST / PROZESSE" -ForegroundColor White
+
+    $svc = Get-Service -Name "DVDRip" -ErrorAction SilentlyContinue
+    if ($svc) {
+        $svcColor = if ($svc.Status -eq 'Running') { 'Green' } else { 'Yellow' }
+        Write-Host "    Windows-Dienst  : $($svc.Status)" -ForegroundColor $svcColor
+    } else {
+        Write-Host "    Windows-Dienst  : nicht installiert" -ForegroundColor Gray
+    }
+
+    $mkvProc = @(Get-Process -Name "makemkvcon"  -ErrorAction SilentlyContinue)
+    $hbProc  = @(Get-Process -Name "HandBrakeCLI" -ErrorAction SilentlyContinue)
+    $ripTxt  = if ($mkvProc) { "aktiv  (PID $($mkvProc[0].Id))" } else { "nicht aktiv" }
+    $encTxt  = if ($hbProc)  { "aktiv  (PID $($hbProc[0].Id))"  } else { "nicht aktiv" }
+    Write-Host "    MakeMKV  (Rip)  : $ripTxt" -ForegroundColor $(if ($mkvProc) { 'Green' } else { 'Gray' })
+    Write-Host "    HandBrake (Enc) : $encTxt" -ForegroundColor $(if ($hbProc)  { 'Green' } else { 'Gray' })
+    Write-Host ""
+
+    # ── DVD-Laufwerk ─────────────────────────────────────────────────────────
+    Write-Host "  DVD-LAUFWERK" -ForegroundColor White
+    try {
+        $cdDrives = @(Get-WmiObject Win32_CDROMDrive -ErrorAction Stop)
+        if ($cdDrives.Count -eq 0) {
+            Write-Host "    Kein optisches Laufwerk gefunden." -ForegroundColor Gray
+        }
+        foreach ($cd in $cdDrives) {
+            $caption = $cd.Caption
+            if ($caption.Length -gt 32) { $caption = $caption.Substring(0,32) + "..." }
+            if ($cd.MediaLoaded) {
+                $vol = if ($cd.VolumeName) { $cd.VolumeName } else { "(kein Label)" }
+                Write-Host "    $($cd.Drive)  $caption" -ForegroundColor White -NoNewline
+                Write-Host "  →  eingelegt: $vol" -ForegroundColor Green
+            } else {
+                Write-Host "    $($cd.Drive)  $caption  →  leer" -ForegroundColor Gray
+            }
+        }
+    } catch {
+        Write-Host "    Laufwerk nicht ermittelbar: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    Write-Host ""
+
+    # ── Archiv ───────────────────────────────────────────────────────────────
+    if ($OutputDir -and (Test-Path $OutputDir)) {
+        $dirs = @(Get-ChildItem -Path $OutputDir -Directory -ErrorAction SilentlyContinue |
+                  Sort-Object Name)
+        Write-Host "  ARCHIV  $OutputDir  ($($dirs.Count) Titel)" -ForegroundColor White
+
+        if ($dirs.Count -eq 0) {
+            Write-Host "    (leer)" -ForegroundColor Gray
+        }
+        foreach ($dir in $dirs) {
+            $encoded = @(Get-ChildItem -Path $dir.FullName -File -ErrorAction SilentlyContinue |
+                         Where-Object { $_.Extension -in '.mp4','.mkv' })
+            $rawDir   = Join-Path $dir.FullName "RAW"
+            $rawFiles = @()
+            if (Test-Path $rawDir) {
+                $rawFiles = @(Get-ChildItem -Path $rawDir -Filter "*.mkv" -ErrorAction SilentlyContinue)
+            }
+            $marker = Join-Path $rawDir "_rip_complete"
+            $title  = $dir.Name.PadRight(38)
+
+            if ($encoded.Count -gt 0) {
+                $gb    = [math]::Round(($encoded | Measure-Object -Property Length -Sum).Sum / 1GB, 1)
+                $names = ($encoded | ForEach-Object { $_.Name }) -join ", "
+                Write-Host "    [OK ] $title $names  ($gb GB)" -ForegroundColor Green
+            } elseif ($rawFiles.Count -gt 0 -and (Test-Path $marker)) {
+                $gb = [math]::Round(($rawFiles | Measure-Object -Property Length -Sum).Sum / 1GB, 1)
+                Write-Host "    [RAW] $title RAW fertig, noch nicht kodiert  ($gb GB)" -ForegroundColor Yellow
+            } elseif ($rawFiles.Count -gt 0) {
+                $gb = [math]::Round(($rawFiles | Measure-Object -Property Length -Sum).Sum / 1GB, 1)
+                Write-Host "    [!  ] $title RAW unvollständig  ($gb GB)" -ForegroundColor Red
+            } else {
+                Write-Host "    [---] $title leer" -ForegroundColor Gray
+            }
+        }
+    } elseif ($OutputDir) {
+        Write-Host "  ARCHIV  $OutputDir" -ForegroundColor White
+        Write-Host "    Verzeichnis nicht gefunden." -ForegroundColor Yellow
+    } else {
+        Write-Host "  ARCHIV  (OutputDir nicht konfiguriert)" -ForegroundColor Gray
+    }
+
+    Write-Host ""
+    Write-Host $line -ForegroundColor Cyan
+}
+
+# ---------------------------------------------------------------------------
 # Service-Hilfsfunktionen
 # ---------------------------------------------------------------------------
 function Test-DiscAlreadyImported {
@@ -862,18 +972,25 @@ function Wait-ForDisc {
                 Write-Log "INFO" "[Service] Polling-Timeout - prüfe Laufwerk ..."
             }
 
-            # Disc-Status über MakeMKV prüfen
+            # Disc-Status über MakeMKV prüfen (ein Aufruf liefert DRV-Zeilen für alle Laufwerke)
             $checkResult = Invoke-ExternalProcess `
                 -Executable $MakeMKVPath `
-                -Arguments @("--robot", "info", "disc:$DriveIndex") `
+                -Arguments @("--robot", "info", "disc:$($DriveIndex[0])") `
                 -StepName "MakeMKV disc-check"
 
-            $discReady = $checkResult.Output | Where-Object { $_ -match "^DRV:$DriveIndex,([2-9]|\d{2})" }
-            if ($discReady) {
-                Write-Log "INFO" "[Service] Disc erkannt."
-                return $true
+            $readyIdx = -1
+            foreach ($idx in $DriveIndex) {
+                if ($checkResult.Output | Where-Object { $_ -match "^DRV:$idx,([2-9]|\d{2})" }) {
+                    $readyIdx = $idx
+                    break
+                }
             }
-            Write-Log "INFO" "[Service] Kein Disc im Laufwerk - weiter warten ..."
+            if ($readyIdx -ge 0) {
+                Write-Log "INFO" "[Service] Disc in Laufwerk $readyIdx erkannt."
+                return $readyIdx
+            }
+            $driveList = $DriveIndex -join ", "
+            Write-Log "INFO" "[Service] Kein Disc in Laufwerk(en) $driveList - weiter warten ..."
         }
     } finally {
         Unregister-Event -SourceIdentifier "DVDRip_DiscInserted" -ErrorAction SilentlyContinue
@@ -882,13 +999,15 @@ function Wait-ForDisc {
 
 function Invoke-SingleImport {
     # Führt einen kompletten Import-Durchlauf durch. Gibt $true bei Erfolg zurück.
+    param([int]$DriveIdx = $DriveIndex[0])
+
     $Script:ExitCode  = 0
     $Script:StartTime = Get-Date
     $Script:DriveLetter = $null
     $Script:DiscSCSIError = $false
 
     try {
-        Main
+        Main -DriveIdx $DriveIdx
     } catch {
         $errMsg = $_.Exception.Message
         if ($Script:LogPath) {
@@ -926,14 +1045,14 @@ function Start-ServiceLoop {
     Send-TelegramMessage "DVDRip v$Script:Version Service gestartet."
 
     while ($true) {
-        # Auf Disc warten
-        Wait-ForDisc -PollMinutes $PollInterval | Out-Null
+        # Auf Disc warten – gibt den Index des bereiten Laufwerks zurück
+        $readyIdx = Wait-ForDisc -PollMinutes $PollInterval
 
         # Disc-Titel vorab lesen um zu prüfen ob bereits importiert
-        Write-Log "INFO" "[Service] Lese Disc-Titel ..."
+        Write-Log "INFO" "[Service] Lese Disc-Titel (Laufwerk $readyIdx) ..."
         $checkTitle = $null
         try {
-            $checkTitle = Get-DiscTitle -MkvCon $MakeMKVPath -Index $DriveIndex
+            $checkTitle = Get-DiscTitle -MkvCon $MakeMKVPath -Index $readyIdx
         } catch { }
 
         if ($checkTitle -and (Test-DiscAlreadyImported -Title $checkTitle -TargetDir $OutputDir)) {
@@ -941,10 +1060,10 @@ function Start-ServiceLoop {
             Send-TelegramMessage "DVD <b>$checkTitle</b> bereits importiert - ausgeworfen."
             Eject-Disc -DriveLetter $Script:DriveLetter
         } else {
-            Write-Log "INFO" "[Service] Starte Import ..."
+            Write-Log "INFO" "[Service] Starte Import (Laufwerk $readyIdx) ..."
             $startTitle = if ($checkTitle) { $checkTitle } else { "Unbekannt" }
             Send-TelegramMessage "DVD <b>$startTitle</b> eingelegt – Import gestartet."
-            Invoke-SingleImport | Out-Null
+            Invoke-SingleImport -DriveIdx $readyIdx | Out-Null
         }
     }
 }
@@ -954,6 +1073,12 @@ function Start-ServiceLoop {
 # ---------------------------------------------------------------------------
 # MakeMKV-Pfad einmalig auflösen (wird auch im Service-Loop benötigt)
 if ($MakeMKVPath -eq "") { $MakeMKVPath = Find-MakeMKV }
+
+if ($Status) {
+    if ($MakeMKVPath -eq "") { $MakeMKVPath = Find-MakeMKV }
+    Show-Status
+    exit 0
+}
 
 if ($ServiceMode) {
     if (-not $MakeMKVPath -or -not (Test-Path $MakeMKVPath)) {
@@ -966,8 +1091,24 @@ if ($ServiceMode) {
     exit 0
 }
 
+if ($DriveIndex.Count -gt 1) {
+    # ---------------------------------------------------------------------------
+    # Mehrere Laufwerke: sequenziell verarbeiten
+    # ---------------------------------------------------------------------------
+    $overallExitCode = 0
+    foreach ($idx in $DriveIndex) {
+        Write-Host "=== Laufwerk $idx ===" -ForegroundColor Cyan
+        Invoke-SingleImport -DriveIdx $idx | Out-Null
+        if ($Script:ExitCode -ne 0 -and $overallExitCode -eq 0) { $overallExitCode = $Script:ExitCode }
+    }
+    exit $overallExitCode
+}
+
+# ---------------------------------------------------------------------------
+# Einzelnes Laufwerk
+# ---------------------------------------------------------------------------
 try {
-    Main
+    Main -DriveIdx $DriveIndex[0]
 } catch {
     $errMsg = $_.Exception.Message
     if ($Script:LogPath) {
@@ -997,6 +1138,5 @@ if ($Script:ExitCode -eq 0) {
     Write-Host $finalMsg -ForegroundColor Red
     Send-TelegramMessage "DVD-Import FEHLER (Code $Script:ExitCode) nach $elapsedStr."
 }
-
 
 exit $Script:ExitCode

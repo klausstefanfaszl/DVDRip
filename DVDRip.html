@@ -44,7 +44,7 @@
 <body>
 
 <header>
-    <h1>DVDRip <span style="font-size:1rem;font-weight:400;opacity:.7">v1.1</span></h1>
+    <h1>DVDRip <span style="font-size:1rem;font-weight:400;opacity:.7">v1.2</span></h1>
     <p>PowerShell-Skript zum automatisierten Rippen und Komprimieren von DVDs</p>
 </header>
 
@@ -114,7 +114,7 @@
     <h3>MakeMKV</h3>
     <table>
         <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
-        <tr><td><code>-DriveIndex</code></td><td><code>0</code></td><td>MakeMKV-Laufwerksindex (0 = erstes optisches Laufwerk).</td></tr>
+        <tr><td><code>-DriveIndex</code></td><td><code>0</code></td><td>MakeMKV-Laufwerksindex. Einzelner Wert oder kommagetrennte Liste für mehrere Laufwerke (<code>-DriveIndex 0,1</code>). Bei mehreren Laufwerken werden diese sequenziell verarbeitet. Im Service-Modus werden alle angegebenen Laufwerke überwacht.</td></tr>
         <tr><td><code>-MinLength</code></td><td><code>1800</code></td><td>Minimale Titellänge in Sekunden. Kürzere Titel werden übersprungen.</td></tr>
         <tr><td><code>-MinMkvSizeMB</code></td><td><code>500</code></td><td>Minimale MKV-Dateigröße in MB. Bricht MakeMKV mit einem Fehler ab, aber die größte erzeugte Datei ist mindestens so groß, wird der Fehler ignoriert und HandBrakeCLI trotzdem gestartet. Typisch bei Lesefehlern am Ende der Disc.</td></tr>
         <tr><td><code>-MakeMKVPath</code></td><td>auto</td><td>Pfad zu <code>makemkvcon.exe</code>. Wird automatisch erkannt falls leer.</td></tr>
@@ -177,6 +177,13 @@
     <h3>Ohne automatischen Auswurf</h3>
     <pre>.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-NoEject</span></pre>
 
+    <h3>Zwei Laufwerke gleichzeitig befüllen</h3>
+    <pre><span class="comment"># Einzel-Modus: Laufwerk 0 dann Laufwerk 1 sequenziell verarbeiten</span>
+.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-DriveIndex</span> 0,1
+
+<span class="comment"># Service-Modus: beide Laufwerke überwachen</span>
+.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-DriveIndex</span> 0,1 <span class="param">-ServiceMode</span></pre>
+
     <h3>Als Dienst im Dauerbetrieb</h3>
     <pre><span class="comment"># Einmal starten – läuft nach jeder DVD weiter und wartet auf die nächste</span>
 .\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-ServiceMode</span>
@@ -196,8 +203,8 @@ DVDRip.bat <span class="param">-SkipRip</span> <span class="param">-DiscTitle</s
     <div class="dir-tree">
         OutputDir/<br>
         &nbsp;&nbsp;&lt;DiscTitle&gt;/<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;RAW/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">&lt;-- MKV-Rohdateien von MakeMKV</span><br>
-        &nbsp;&nbsp;&nbsp;&nbsp;Encoded/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">&lt;-- Komprimierte Dateien von HandBrakeCLI</span>
+        &nbsp;&nbsp;&nbsp;&nbsp;RAW/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">&lt;-- MKV-Rohdateien von MakeMKV (temporär, wird nach Encoding gelöscht)</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;*.mp4 / *.mkv&nbsp;<span class="comment">&lt;-- Kodierte Dateien direkt im Disc-Ordner</span>
     </div>
 
     <h2 id="logging">Logging</h2>
@@ -240,9 +247,10 @@ DVDRip.bat <span class="param">-SkipRip</span> <span class="param">-DiscTitle</s
         fehlt es an beiden Stellen, bricht das Skript mit einem Fehler ab.
     </p>
     <p>
-        <strong>Auto-Erkennung:</strong> Wird <code>-Config</code> nicht angegeben, sucht das Skript
-        automatisch nach einer Datei namens <code>DVDRip.json</code> im aktuellen Arbeitsverzeichnis.
-        Wird sie gefunden, wird sie stillschweigend als Konfig-Datei verwendet.
+        <strong>Auto-Erkennung:</strong> Wird <code>-Config</code> nicht angegeben <em>und werden keine weiteren Parameter übergeben</em>,
+        sucht das Skript automatisch nach einer Datei namens <code>DVDRip.json</code> im aktuellen Arbeitsverzeichnis.
+        Wird sie gefunden, wird sie als Konfig-Datei verwendet. Sobald mindestens ein Parameter explizit angegeben wird,
+        entfällt die Auto-Erkennung — die Config muss dann bei Bedarf explizit mit <code>-Config</code> angegeben werden.
     </p>
     <p>Musterdatei <code>DVDRip.json</code>:</p>
     <pre>{

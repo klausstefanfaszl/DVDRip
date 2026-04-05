@@ -23,14 +23,17 @@ PowerShell-Skript zum automatisierten Rippen und Komprimieren von DVDs.
 
 | Parameter | Typ | Standard | Beschreibung |
 |-----------|-----|----------|--------------|
+| `-Config` | String | – | Pfad zu einer JSON-Konfig-Datei. Wird auto. geladen wenn keine Parameter angegeben und `DVDRip.json` vorhanden. CLI-Parameter haben stets Vorrang. |
 | `-OutputDir` | String | **Pflicht** | Zielverzeichnis; Unterordner wird automatisch angelegt |
 | `-DiscTitle` | String | auto | Ordnername; wird aus Disc-Inhalt ermittelt falls leer |
 | `-DriveIndex` | Int | `0` | MakeMKV-Laufwerksindex |
 | `-MinLength` | Int | `1800` | Minimale Titellänge in Sekunden (MakeMKV) |
+| `-MinMkvSizeMB` | Int | `500` | Minimale MKV-Größe in MB; bei MakeMKV-Fehler trotzdem fortfahren wenn überschritten |
 | `-HBPreset` | String | `H.265 MP4 576p25` | HandBrakeCLI-Preset (MP4 → .mp4, MKV → .mkv) |
 | `-HBQuality` | Int | `22` | HandBrakeCLI RF-Qualität (kleiner = besser) |
 | `-HBExtraArgs` | String | – | Zusätzliche HandBrakeCLI-Argumente |
-| `-LogDir` | String | OutputDir | Verzeichnis für Log-Dateien |
+| `-LogDir` | String | OutputDir | Basisverzeichnis für Log-Dateien |
+| `-LogFile` | String | – | Log-Dateiname/-Pfad (Append). Relativ zu `-LogDir`; ohne Angabe: Timestamped-File |
 | `-TempDir` | String | `%TEMP%` | Lokales Zwischenverzeichnis für Rip und Encoding |
 | `-MakeMKVPath` | String | auto | Pfad zu `makemkvcon.exe` |
 | `-HandBrakePath` | String | siehe oben | Pfad zu `HandBrakeCLI.exe` |
@@ -40,6 +43,8 @@ PowerShell-Skript zum automatisierten Rippen und Komprimieren von DVDs.
 | `-SkipRip` | Switch | `false` | MakeMKV-Schritt überspringen |
 | `-SkipEncode` | Switch | `false` | HandBrakeCLI-Schritt überspringen |
 | `-NoEject` | Switch | `false` | DVD nach Abschluss **nicht** auswerfen |
+| `-ServiceMode` | Switch | `false` | Dauerbetrieb: wartet nach jeder DVD auf die nächste |
+| `-PollInterval` | Int | `5` | Polling-Intervall in Minuten im Service-Modus |
 
 ## Beispiele
 
@@ -62,8 +67,8 @@ PowerShell-Skript zum automatisierten Rippen und Komprimieren von DVDs.
 ```
 OutputDir/
   <DiscTitle>/
-    RAW/          <- MKV-Rohdateien von MakeMKV
-    Encoded/      <- Komprimierte Dateien von HandBrakeCLI
+    RAW/          <- MKV-Rohdateien von MakeMKV (temporär, wird nach Encoding gelöscht)
+    *.mp4 / *.mkv <- Kodierte Dateien direkt im Disc-Ordner
 ```
 
 ## Logging
@@ -89,4 +94,6 @@ OutputDir/
 | `DVDRip.ps1` | Hauptskript |
 | `DVDRip.bat` | Einsatzbereiter Wrapper mit allen projektspezifischen Einstellungen |
 | `DVDRip_example.bat` | Vorlage mit kommentierten Parameterbeispielen (kein Token) |
+| `DVDRip_example.json` | Musterkonfig-Datei (als `DVDRip.json` kopieren und anpassen) |
+| `Install-DVDRipService.ps1` | Installiert DVDRip als Windows-Dienst via NSSM |
 | `DVDRip.html` | Vollständige HTML-Dokumentation |
