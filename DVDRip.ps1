@@ -30,7 +30,14 @@
     Zusätzliche HandBrakeCLI-Argumente als einzelner String.
 
 .PARAMETER LogDir
-    Verzeichnis für die Log-Datei (Standard: OutputDir).
+    Basisverzeichnis für Log-Dateien (Standard: OutputDir). Wird als Basis
+    verwendet, wenn -LogFile einen relativen Pfad enthält.
+
+.PARAMETER LogFile
+    Dateiname oder Pfad der Log-Datei. Log-Einträge werden angehängt (append).
+    Absoluter Pfad: wird direkt verwendet.
+    Relativer Pfad: wird mit -LogDir (bzw. OutputDir) kombiniert.
+    Ohne Angabe: neues Timestamped-File im OutputDir (bzw. LogDir).
 
 .PARAMETER DebugMode
     Schalter: Ausgabe auf Stdout zusätzlich zur Log-Datei aktivieren.
@@ -115,6 +122,9 @@ param(
     [string]$LogDir = "",
 
     [Parameter(Mandatory = $false)]
+    [string]$LogFile = "",
+
+    [Parameter(Mandatory = $false)]
     [switch]$DebugMode,
 
     [Parameter(Mandatory = $false)]
@@ -158,9 +168,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ---------------------------------------------------------------------------
+# Version
+# ---------------------------------------------------------------------------
+$Script:Version          = "1.1"
+
+# ---------------------------------------------------------------------------
 # Interne Variablen
 # ---------------------------------------------------------------------------
-$Script:LogFile          = $null
+$Script:LogPath          = $null
 $Script:ExitCode         = 0
 $Script:StartTime        = Get-Date
 $Script:ScriptName       = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
@@ -202,6 +217,7 @@ if ($Config -ne "") {
                 "HBQuality"      { $script:HBQuality      = [int]$val }
                 "HBExtraArgs"    { $script:HBExtraArgs    = [string]$val }
                 "LogDir"         { $script:LogDir         = [string]$val }
+                "LogFile"        { $script:LogFile        = [string]$val }
                 "TempDir"        { $script:TempDir        = [string]$val }
                 "MakeMKVPath"    { $script:MakeMKVPath    = [string]$val }
                 "HandBrakePath"  { $script:HandBrakePath  = [string]$val }
@@ -229,17 +245,27 @@ if ($OutputDir -eq "") {
 # Logging-Funktionen
 # ---------------------------------------------------------------------------
 function Initialize-Log {
-    param([string]$Dir)
+    $base = if ($LogDir) { $LogDir } else { $OutputDir }
 
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $logFileName = "$Script:ScriptName`_$timestamp.log"
-
-    if (-not (Test-Path $Dir)) {
-        New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+    if ($LogFile -ne "") {
+        # -LogFile angegeben: absoluter oder relativer Pfad
+        if ([System.IO.Path]::IsPathRooted($LogFile)) {
+            $Script:LogPath = $LogFile
+        } else {
+            $Script:LogPath = Join-Path $base $LogFile
+        }
+    } else {
+        # Kein -LogFile: neues Timestamped-File im OutputDir (bzw. LogDir)
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $Script:LogPath = Join-Path $base "$Script:ScriptName`_$timestamp.log"
     }
 
-    $Script:LogFile = Join-Path $Dir $logFileName
-    Write-Log "INFO" "Log gestartet: $Script:LogFile"
+    $logParent = [System.IO.Path]::GetDirectoryName($Script:LogPath)
+    if ($logParent -and -not (Test-Path $logParent)) {
+        New-Item -ItemType Directory -Path $logParent -Force | Out-Null
+    }
+
+    Write-Log "INFO" "Log gestartet: $Script:LogPath"
     Write-Log "INFO" "Parameter: OutputDir='$OutputDir' DiscTitle='$DiscTitle' DriveIndex=$DriveIndex MinLength=$MinLength HBPreset='$HBPreset' HBQuality=$HBQuality DebugMode=$DebugMode SkipRip=$SkipRip SkipEncode=$SkipEncode"
 }
 
@@ -254,8 +280,8 @@ function Write-Log {
     $line = "[$ts] [$Level] $Message"
 
     # Immer in Log-Datei schreiben
-    if ($Script:LogFile) {
-        Add-Content -Path $Script:LogFile -Value $line -Encoding UTF8
+    if ($Script:LogPath) {
+        Add-Content -Path $Script:LogPath -Value $line -Encoding UTF8
     }
 
     # Nur im Debug-Modus auf Stdout
@@ -489,11 +515,10 @@ function Sanitize-FolderName {
 # ---------------------------------------------------------------------------
 function Main {
 
-    # 1. Log initialisieren (immer lokal, am Ende auf OutputDir kopieren)
-    $logBase = if ($LogDir) { $LogDir } else { $PSScriptRoot }
-    Initialize-Log -Dir $logBase
+    # 1. Log initialisieren
+    Initialize-Log
 
-    Write-Log "INFO" "=== $Script:ScriptName gestartet ==="
+    Write-Log "INFO" "=== $Script:ScriptName v$Script:Version gestartet ==="
     Send-TelegramMessage "DVD-Import gestartet$(if ($DiscTitle) { ": <b>$DiscTitle</b>" })"
 
     # 2. Voraussetzungen prüfen
@@ -562,6 +587,69 @@ function Main {
         if (-not $SkipEncode -and -not (Test-Path $discDir)) {
             New-Item -ItemType Directory -Path $discDir -Force | Out-Null
             Write-Log "INFO" "Zielverzeichnis erstellt: $discDir"
+        }
+    }
+
+    # Ausgabe-Extension vorab bestimmen (wird in 4b und 6 genutzt)
+    $outExt = if ($HBPreset -match '\bMKV\b') { ".mkv" } else { ".mp4" }
+
+    # 4b. Vorhandene große MKV-Datei → MP4 konvertieren (Migration alter Rips)
+    if ($outExt -eq ".mp4" -and -not $SkipEncode -and (Test-Path $discDir)) {
+        $largeMkvs = @(Get-ChildItem -Path $discDir -File -Filter "*.mkv" -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Length -gt 4GB })
+        if ($largeMkvs.Count -gt 0) {
+            $sizeStr = [math]::Round(($largeMkvs | Measure-Object -Property Length -Sum).Sum / 1GB, 1)
+            Write-Log "INFO" "Schritt 4b: $($largeMkvs.Count) große MKV-Datei(en) ($sizeStr GB) gefunden - starte Konvertierung zu MP4."
+            Send-TelegramMessage "DVD <b>$folderName</b>: $($largeMkvs.Count) MKV-Datei(en) ($sizeStr GB) → MP4 Konvertierung gestartet."
+
+            if (-not (Test-Path $HandBrakePath)) {
+                Write-Log "ERROR" "HandBrakeCLI.exe nicht gefunden: $HandBrakePath"
+                $Script:ExitCode = 1
+                return
+            }
+
+            $baseName     = $folderName -replace '\s+', '_'
+            $convertOk    = 0
+            $convertErr   = 0
+            $fileIndex    = 1
+            foreach ($mkv in $largeMkvs) {
+                $suffix  = if ($largeMkvs.Count -gt 1) { "_$($fileIndex.ToString('D2'))" } else { "" }
+                $outFile = Join-Path $discDir ($baseName + $suffix + ".mp4")
+                $fileIndex++
+
+                $hbArgs = [System.Collections.Generic.List[string]]::new()
+                $hbArgs.Add("-i `"$($mkv.FullName)`"")
+                $hbArgs.Add("-o `"$outFile`"")
+                $hbArgs.Add("-q $HBQuality")
+                if ($HBPreset)    { $hbArgs.Add("--preset `"$HBPreset`"") }
+                if ($HBExtraArgs) { $hbArgs.Add($HBExtraArgs) }
+
+                Write-Log "INFO" "Konvertiere: '$($mkv.Name)' → '$([System.IO.Path]::GetFileName($outFile))'"
+                $hbResult = Invoke-ExternalProcess `
+                    -Executable $HandBrakePath `
+                    -Arguments $hbArgs.ToArray() `
+                    -StepName "HandBrakeCLI Konvertierung [$($mkv.Name)]" `
+                    -StreamProgress:$DebugMode
+
+                if ($hbResult.ExitCode -ne 0) {
+                    Write-Log "ERROR" "Konvertierung fehlgeschlagen für '$($mkv.Name)' (ExitCode: $($hbResult.ExitCode))"
+                    $convertErr++
+                } else {
+                    Write-Log "INFO" "Konvertierung erfolgreich: '$($mkv.Name)' gelöscht."
+                    Remove-Item -Path $mkv.FullName -Force -ErrorAction SilentlyContinue
+                    $convertOk++
+                }
+            }
+
+            if ($convertErr -eq 0) {
+                Write-Log "INFO" "MKV → MP4 Konvertierung abgeschlossen. $convertOk Datei(en) erfolgreich."
+                Send-TelegramMessage "DVD <b>$folderName</b>: MKV → MP4 abgeschlossen ($convertOk Datei(en)). MKV gelöscht."
+            } else {
+                Write-Log "ERROR" "MKV → MP4 Konvertierung: $convertOk OK, $convertErr Fehler."
+                Send-TelegramMessage "DVD <b>$folderName</b>: MKV → MP4 mit $convertErr Fehler(n). MP4 ggf. unvollständig."
+                $Script:ExitCode = 3
+            }
+            return
         }
     }
 
@@ -664,8 +752,6 @@ function Main {
             New-Item -ItemType Directory -Path $localDir -Force | Out-Null
         }
 
-        # Ausgabedateiendung aus Preset ableiten (MP4 wenn Preset "MP4" enthält, sonst MKV)
-        $outExt = if ($HBPreset -match '\bMKV\b') { ".mkv" } else { ".mp4" }
 
         # Basis-Dateiname aus Disc-Titel ableiten (Leerzeichen → Unterstrich)
         $baseName = $folderName -replace '\s+', '_'
@@ -743,8 +829,9 @@ function Test-DiscAlreadyImported {
     param([string]$Title, [string]$TargetDir)
     $dir = Join-Path $TargetDir (Sanitize-FolderName $Title)
     if (-not (Test-Path $dir)) { return $false }
+    $targetExt = if ($HBPreset -match '\bMKV\b') { '.mkv' } else { '.mp4' }
     $files = @(Get-ChildItem -Path $dir -File -ErrorAction SilentlyContinue |
-               Where-Object { $_.Extension -in '.mp4', '.mkv' })
+               Where-Object { $_.Extension -eq $targetExt })
     return $files.Count -gt 0
 }
 
@@ -804,7 +891,7 @@ function Invoke-SingleImport {
         Main
     } catch {
         $errMsg = $_.Exception.Message
-        if ($Script:LogFile) {
+        if ($Script:LogPath) {
             Write-Log "ERROR" "Unerwarteter Fehler: $errMsg"
             Write-Log "ERROR" "Stack Trace: $($_.ScriptStackTrace)"
         } else {
@@ -817,34 +904,26 @@ function Invoke-SingleImport {
     $elapsedStr = "{0:hh\:mm\:ss}" -f $elapsed
 
     if ($Script:ExitCode -eq 0) {
-        $finalMsg = "ERFOLG - Import beendet nach $elapsedStr. Log: $Script:LogFile"
+        $finalMsg = "ERFOLG - Import beendet nach $elapsedStr. Log: $Script:LogPath"
         Write-Log "INFO" $finalMsg
         Write-Host $finalMsg -ForegroundColor Green
         if (-not $NoEject) { Eject-Disc -DriveLetter $Script:DriveLetter }
         Send-TelegramMessage "Fertig: <b>$Script:LastDiscTitle</b> ($elapsedStr)&#10;Bitte naechste DVD einlegen."
     } else {
-        $finalMsg = "FEHLER (Code $Script:ExitCode) - Import beendet nach $elapsedStr. Log: $Script:LogFile"
+        $finalMsg = "FEHLER (Code $Script:ExitCode) - Import beendet nach $elapsedStr. Log: $Script:LogPath"
         Write-Log "ERROR" $finalMsg
         Write-Host $finalMsg -ForegroundColor Red
         if (-not $NoEject) { Eject-Disc -DriveLetter $Script:DriveLetter }
         Send-TelegramMessage "DVD-Import FEHLER (Code $Script:ExitCode) nach $elapsedStr."
     }
 
-    # Log auf OutputDir kopieren
-    if (-not $LogDir -and $Script:LogFile -and (Test-Path $Script:LogFile)) {
-        try {
-            if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null }
-            Copy-Item -Path $Script:LogFile -Destination $OutputDir -Force
-        } catch { }
-    }
-
     return ($Script:ExitCode -eq 0)
 }
 
 function Start-ServiceLoop {
-    Write-Host "=== DVDRip Service-Modus gestartet ===" -ForegroundColor Cyan
-    Write-Log "INFO" "[Service] Service-Modus aktiv. PollInterval: $PollInterval Min."
-    Send-TelegramMessage "DVDRip Service gestartet."
+    Write-Host "=== DVDRip v$Script:Version Service-Modus gestartet ===" -ForegroundColor Cyan
+    Write-Log "INFO" "[Service] DVDRip v$Script:Version - Service-Modus aktiv. PollInterval: $PollInterval Min."
+    Send-TelegramMessage "DVDRip v$Script:Version Service gestartet."
 
     while ($true) {
         # Auf Disc warten
@@ -881,9 +960,8 @@ if ($ServiceMode) {
         Write-Host "[ERROR] makemkvcon.exe nicht gefunden. Service-Modus nicht möglich." -ForegroundColor Red
         exit 1
     }
-    # Log-Basisverzeichnis für Service-Modus initialisieren
-    $logBase = if ($LogDir) { $LogDir } else { $PSScriptRoot }
-    Initialize-Log -Dir $logBase
+    # Log für Service-Modus initialisieren
+    Initialize-Log
     Start-ServiceLoop
     exit 0
 }
@@ -892,7 +970,7 @@ try {
     Main
 } catch {
     $errMsg = $_.Exception.Message
-    if ($Script:LogFile) {
+    if ($Script:LogPath) {
         Write-Log "ERROR" "Unerwarteter Fehler: $errMsg"
         Write-Log "ERROR" "Stack Trace: $($_.ScriptStackTrace)"
     } else {
@@ -908,29 +986,17 @@ $elapsed = (Get-Date) - $Script:StartTime
 $elapsedStr = "{0:hh\:mm\:ss}" -f $elapsed
 
 if ($Script:ExitCode -eq 0) {
-    $finalMsg = "ERFOLG - Skript beendet nach $elapsedStr. Log: $Script:LogFile"
+    $finalMsg = "ERFOLG - Skript beendet nach $elapsedStr. Log: $Script:LogPath"
     Write-Log "INFO" $finalMsg
     Write-Host $finalMsg -ForegroundColor Green
     if (-not $NoEject) { Eject-Disc -DriveLetter $Script:DriveLetter }
     Send-TelegramMessage "Fertig: <b>$Script:LastDiscTitle</b> ($elapsedStr)&#10;Bitte naechste DVD einlegen."
 } else {
-    $finalMsg = "FEHLER (Code $Script:ExitCode) - Skript beendet nach $elapsedStr. Log: $Script:LogFile"
+    $finalMsg = "FEHLER (Code $Script:ExitCode) - Skript beendet nach $elapsedStr. Log: $Script:LogPath"
     Write-Log "ERROR" $finalMsg
     Write-Host $finalMsg -ForegroundColor Red
     Send-TelegramMessage "DVD-Import FEHLER (Code $Script:ExitCode) nach $elapsedStr."
 }
 
-# Log auf OutputDir kopieren (nur wenn kein explizites -LogDir angegeben)
-if (-not $LogDir -and $Script:LogFile -and (Test-Path $Script:LogFile)) {
-    try {
-        if (-not (Test-Path $OutputDir)) {
-            New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-        }
-        Copy-Item -Path $Script:LogFile -Destination $OutputDir -Force
-        Write-Host "Log kopiert nach: $OutputDir" -ForegroundColor Cyan
-    } catch {
-        Write-Host "Log konnte nicht auf OutputDir kopiert werden: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-}
 
 exit $Script:ExitCode

@@ -44,7 +44,7 @@
 <body>
 
 <header>
-    <h1>DVDRip</h1>
+    <h1>DVDRip <span style="font-size:1rem;font-weight:400;opacity:.7">v1.1</span></h1>
     <p>PowerShell-Skript zum automatisierten Rippen und Komprimieren von DVDs</p>
 </header>
 
@@ -106,7 +106,8 @@
         <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
         <tr><td><code>-OutputDir</code> <span class="badge badge-required">Pflicht*</span></td><td>–</td><td>Zielverzeichnis. Darunter wird automatisch ein Unterordner pro DVD angelegt. Kann alternativ über die Konfig-Datei angegeben werden.</td></tr>
         <tr><td><code>-DiscTitle</code></td><td>auto</td><td>Name des DVD-Unterordners. Wird automatisch aus dem Disc-Inhalt ermittelt, falls nicht angegeben.</td></tr>
-        <tr><td><code>-LogDir</code></td><td>OutputDir</td><td>Verzeichnis für die Log-Datei.</td></tr>
+        <tr><td><code>-LogDir</code></td><td>OutputDir</td><td>Basisverzeichnis für Log-Dateien. Wird als Basis verwendet wenn <code>-LogFile</code> einen relativen Pfad enthält.</td></tr>
+        <tr><td><code>-LogFile</code></td><td>–</td><td>Dateiname oder Pfad der Log-Datei (Append-Modus). Absoluter Pfad wird direkt verwendet; relativer Pfad wird mit <code>-LogDir</code> (bzw. OutputDir) kombiniert. Ohne Angabe wird ein neues Timestamped-File in OutputDir angelegt.</td></tr>
         <tr><td><code>-TempDir</code></td><td>%TEMP%</td><td>Lokales Zwischenverzeichnis für Rip und Encoding bei Netzwerk-OutputDir.</td></tr>
     </table>
 
