@@ -1,0 +1,284 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DVDRip – Dokumentation</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Segoe UI, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #222; background: #f7f8fa; }
+        header { background: #1a1a2e; color: #fff; padding: 2rem 3rem; }
+        header h1 { font-size: 2rem; font-weight: 700; }
+        header p { margin-top: 0.4rem; color: #aab4c8; }
+        main { max-width: 960px; margin: 2rem auto; padding: 0 2rem 4rem; }
+        h2 { font-size: 1.3rem; font-weight: 700; margin: 2rem 0 0.8rem; padding-bottom: 0.3rem; border-bottom: 2px solid #dde; color: #1a1a2e; }
+        h3 { font-size: 1.05rem; font-weight: 700; margin: 1.4rem 0 0.4rem; color: #333; }
+        p { margin-bottom: 0.8rem; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 1.2rem; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+        th { background: #1a1a2e; color: #fff; padding: 0.6rem 0.9rem; text-align: left; font-size: 0.9rem; }
+        td { padding: 0.55rem 0.9rem; border-bottom: 1px solid #eef; vertical-align: top; }
+        tr:last-child td { border-bottom: none; }
+        tr:nth-child(even) td { background: #f9fafc; }
+        code { background: #eef0f6; padding: 0.15em 0.45em; border-radius: 3px; font-family: Consolas, monospace; font-size: 0.92em; color: #c0392b; }
+        pre { background: #1e2030; color: #cdd6f4; padding: 1.1rem 1.4rem; border-radius: 6px; overflow-x: auto; margin-bottom: 1.2rem; font-family: Consolas, monospace; font-size: 0.9rem; line-height: 1.7; }
+        pre .comment { color: #6c7a96; }
+        pre .keyword { color: #89dceb; }
+        pre .string { color: #a6e3a1; }
+        pre .param { color: #f9e2af; }
+        .badge { display: inline-block; padding: 0.15em 0.6em; border-radius: 3px; font-size: 0.8em; font-weight: 700; margin-left: 0.3em; vertical-align: middle; }
+        .badge-required { background: #e74c3c; color: #fff; }
+        .badge-switch { background: #3498db; color: #fff; }
+        .badge-optional { background: #95a5a6; color: #fff; }
+        .exitcode-ok { color: #27ae60; font-weight: 700; }
+        .exitcode-err { color: #e74c3c; font-weight: 700; }
+        .dir-tree { background: #fff; border: 1px solid #dde; border-radius: 6px; padding: 1rem 1.4rem; font-family: Consolas, monospace; font-size: 0.9rem; margin-bottom: 1.2rem; }
+        .dir-tree .comment { color: #888; }
+        ul { margin: 0.4rem 0 0.8rem 1.4rem; }
+        li { margin-bottom: 0.3rem; }
+        .toc { background: #fff; border: 1px solid #dde; border-radius: 6px; padding: 1rem 1.4rem; margin-bottom: 2rem; display: inline-block; }
+        .toc a { color: #1a1a2e; text-decoration: none; }
+        .toc a:hover { text-decoration: underline; }
+        .toc li { margin-bottom: 0.2rem; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>DVDRip</h1>
+    <p>PowerShell-Skript zum automatisierten Rippen und Komprimieren von DVDs</p>
+</header>
+
+<main>
+
+    <h2>Inhaltsverzeichnis</h2>
+    <div class="toc">
+        <ul>
+            <li><a href="#uebersicht">Übersicht</a></li>
+            <li><a href="#voraussetzungen">Voraussetzungen</a></li>
+            <li><a href="#dateien">Dateien</a></li>
+            <li><a href="#parameter">Parameter</a></li>
+            <li><a href="#beispiele">Beispiele</a></li>
+            <li><a href="#verzeichnisse">Verzeichnisstruktur</a></li>
+            <li><a href="#logging">Logging</a></li>
+            <li><a href="#exitcodes">Exit-Codes</a></li>
+            <li><a href="#ablauf">Ablauf</a></li>
+            <li><a href="#servicemode">Service-Modus</a></li>
+            <li><a href="#konfig">Konfig-Datei</a></li>
+        </ul>
+    </div>
+
+    <h2 id="uebersicht">Übersicht</h2>
+    <p>
+        <code>DVDRip.ps1</code> liest eine eingelegte DVD mit <strong>MakeMKV</strong> aus und
+        komprimiert die erzeugten MKV-Dateien anschließend mit <strong>HandBrakeCLI</strong>.
+        Optional werden Fortschrittsnachrichten per <strong>Telegram</strong> versandt und die DVD
+        nach Abschluss automatisch ausgeworfen.
+    </p>
+
+    <h2 id="voraussetzungen">Voraussetzungen</h2>
+    <table>
+        <tr><th>Tool</th><th>Standard-Pfad</th></tr>
+        <tr><td><strong>MakeMKV</strong></td><td><code>C:\Program Files (x86)\MakeMKV\makemkvcon.exe</code><br>oder <code>C:\Program Files\MakeMKV\makemkvcon.exe</code> (auto-detect)</td></tr>
+        <tr><td><strong>HandBrakeCLI</strong></td><td><code>C:\Program Files\HandbrakeCLI\HandBrakeCLI.exe</code></td></tr>
+    </table>
+
+    <h2 id="dateien">Dateien</h2>
+    <table>
+        <tr><th>Datei</th><th>Beschreibung</th></tr>
+        <tr><td><code>DVDRip.ps1</code></td><td>Hauptskript</td></tr>
+        <tr><td><code>DVDRip.bat</code></td><td>Einsatzbereiter Wrapper mit allen projektspezifischen Einstellungen (OutputDir, Telegram)</td></tr>
+        <tr><td><code>DVDRip_example.bat</code></td><td>Vorlage mit kommentierten Parameterbeispielen, ohne Token-Informationen</td></tr>
+        <tr><td><code>DVDRip_example.json</code></td><td>Musterkonfig-Datei für alle Parameter (ohne Credentials) – als <code>DVDRip.json</code> kopieren und anpassen</td></tr>
+        <tr><td><code>DVDRip.html</code></td><td>Diese Dokumentation</td></tr>
+        <tr><td><code>README.md</code></td><td>Kurzreferenz</td></tr>
+    </table>
+
+    <h2 id="parameter">Parameter</h2>
+
+    <h3>Konfig-Datei</h3>
+    <table>
+        <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
+        <tr><td><code>-Config</code></td><td>–</td><td>Pfad zu einer JSON-Konfig-Datei. Alle dort definierten Werte werden als Standardwerte übernommen. Explizit per CLI übergebene Parameter haben stets Vorrang.</td></tr>
+    </table>
+
+    <h3>Verzeichnisse &amp; Ausgabe</h3>
+    <table>
+        <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
+        <tr><td><code>-OutputDir</code> <span class="badge badge-required">Pflicht*</span></td><td>–</td><td>Zielverzeichnis. Darunter wird automatisch ein Unterordner pro DVD angelegt. Kann alternativ über die Konfig-Datei angegeben werden.</td></tr>
+        <tr><td><code>-DiscTitle</code></td><td>auto</td><td>Name des DVD-Unterordners. Wird automatisch aus dem Disc-Inhalt ermittelt, falls nicht angegeben.</td></tr>
+        <tr><td><code>-LogDir</code></td><td>OutputDir</td><td>Verzeichnis für die Log-Datei.</td></tr>
+        <tr><td><code>-TempDir</code></td><td>%TEMP%</td><td>Lokales Zwischenverzeichnis für Rip und Encoding bei Netzwerk-OutputDir.</td></tr>
+    </table>
+
+    <h3>MakeMKV</h3>
+    <table>
+        <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
+        <tr><td><code>-DriveIndex</code></td><td><code>0</code></td><td>MakeMKV-Laufwerksindex (0 = erstes optisches Laufwerk).</td></tr>
+        <tr><td><code>-MinLength</code></td><td><code>1800</code></td><td>Minimale Titellänge in Sekunden. Kürzere Titel werden übersprungen.</td></tr>
+        <tr><td><code>-MinMkvSizeMB</code></td><td><code>500</code></td><td>Minimale MKV-Dateigröße in MB. Bricht MakeMKV mit einem Fehler ab, aber die größte erzeugte Datei ist mindestens so groß, wird der Fehler ignoriert und HandBrakeCLI trotzdem gestartet. Typisch bei Lesefehlern am Ende der Disc.</td></tr>
+        <tr><td><code>-MakeMKVPath</code></td><td>auto</td><td>Pfad zu <code>makemkvcon.exe</code>. Wird automatisch erkannt falls leer.</td></tr>
+    </table>
+
+    <h3>HandBrakeCLI</h3>
+    <table>
+        <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
+        <tr><td><code>-HBPreset</code></td><td><code>HQ 576p25 Surround</code></td><td>HandBrakeCLI-Preset (ab v1.11). Leer = kein Preset. Ausgabe-Container wird automatisch aus dem Preset-Namen abgeleitet (MKV wenn Name „MKV" enthält, sonst MP4).</td></tr>
+        <tr><td><code>-HBQuality</code></td><td><code>22</code></td><td>RF-Qualitätsfaktor. Kleinere Werte = bessere Qualität, größere Datei.</td></tr>
+        <tr><td><code>-HBExtraArgs</code></td><td>–</td><td>Zusätzliche HandBrakeCLI-Argumente als einzelner String.</td></tr>
+        <tr><td><code>-HandBrakePath</code></td><td>siehe oben</td><td>Pfad zu <code>HandBrakeCLI.exe</code>.</td></tr>
+    </table>
+
+    <h3>Schalter</h3>
+    <table>
+        <tr><th>Parameter</th><th>Beschreibung</th></tr>
+        <tr><td><code>-DebugMode</code> <span class="badge badge-switch">Switch</span></td><td>Alle Log-Zeilen farbig auf Stdout ausgeben. HandBrake-Fortschritt wird live gestreamt.</td></tr>
+        <tr><td><code>-SkipRip</code> <span class="badge badge-switch">Switch</span></td><td>MakeMKV-Schritt überspringen. Nützlich wenn MKV-Dateien bereits vorhanden sind.</td></tr>
+        <tr><td><code>-SkipEncode</code> <span class="badge badge-switch">Switch</span></td><td>HandBrakeCLI-Schritt überspringen. Nur rippen, nicht kodieren.</td></tr>
+        <tr><td><code>-NoEject</code> <span class="badge badge-switch">Switch</span></td><td>DVD nach Abschluss <strong>nicht</strong> auswerfen. Standard: DVD wird automatisch ausgeworfen.</td></tr>
+        <tr><td><code>-ServiceMode</code> <span class="badge badge-switch">Switch</span></td><td>Dauerbetrieb: Das Skript läuft kontinuierlich und wartet nach jeder verarbeiteten DVD automatisch auf die nächste Disc (WMI-Event + Polling). Ideal für den Betrieb als Windows-Dienst.</td></tr>
+    </table>
+
+    <h3>Service-Modus</h3>
+    <table>
+        <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
+        <tr><td><code>-PollInterval</code></td><td><code>5</code></td><td>Polling-Intervall in Minuten, mit dem im Service-Modus auf eine neue DVD geprüft wird. Nur relevant bei aktiver <code>-ServiceMode</code>-Option.</td></tr>
+    </table>
+
+    <h3>Telegram</h3>
+    <table>
+        <tr><th>Parameter</th><th>Beschreibung</th></tr>
+        <tr><td><code>-TelegramToken</code></td><td>Bot-Token. Leer = keine Benachrichtigungen.</td></tr>
+        <tr><td><code>-TelegramChatId</code></td><td>Chat-ID des Empfängers.</td></tr>
+    </table>
+    <p>Benachrichtigungen werden gesendet bei: Start, Rip-abgeschlossen, Kodierung-abgeschlossen, Fehler und Fertig ("Bitte nächste DVD einlegen").</p>
+
+    <h2 id="beispiele">Beispiele</h2>
+
+    <h3>Mit Konfig-Datei</h3>
+    <pre><span class="comment"># Alle Einstellungen aus DVDRip.json laden</span>
+.\DVDRip.ps1 <span class="param">-Config</span> <span class="string">".\DVDRip.json"</span>
+
+<span class="comment"># Konfig als Basis, einzelne Parameter per CLI überschreiben</span>
+.\DVDRip.ps1 <span class="param">-Config</span> <span class="string">".\DVDRip.json"</span> <span class="param">-DiscTitle</span> <span class="string">"MeinFilm"</span> <span class="param">-SkipRip</span></pre>
+
+    <h3>Minimal (alles automatisch)</h3>
+    <pre>.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-DebugMode</span></pre>
+
+    <h3>Mit Preset und Qualität</h3>
+    <pre>.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-HBPreset</span> <span class="string">"H.265 MKV 1080p"</span> <span class="param">-HBQuality</span> 20</pre>
+
+    <h3>Nur rippen, nicht kodieren</h3>
+    <pre>.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-SkipEncode</span> <span class="param">-DebugMode</span></pre>
+
+    <h3>Nur kodieren (MKV bereits vorhanden)</h3>
+    <pre>.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-DiscTitle</span> <span class="string">"MeinFilm"</span> <span class="param">-SkipRip</span> <span class="param">-DebugMode</span></pre>
+
+    <h3>Ohne automatischen Auswurf</h3>
+    <pre>.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-NoEject</span></pre>
+
+    <h3>Als Dienst im Dauerbetrieb</h3>
+    <pre><span class="comment"># Einmal starten – läuft nach jeder DVD weiter und wartet auf die nächste</span>
+.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-ServiceMode</span>
+
+<span class="comment"># Polling alle 2 Minuten statt der Standard-5-Minuten</span>
+.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-ServiceMode</span> <span class="param">-PollInterval</span> 2</pre>
+
+    <h3>Über den Wrapper</h3>
+    <pre><span class="comment">:: Einfachster Aufruf - alle Einstellungen stehen in DVDRip.bat</span>
+DVDRip.bat
+
+<span class="comment">:: Zusätzliche Parameter durchreichen</span>
+DVDRip.bat <span class="param">-DebugMode</span>
+DVDRip.bat <span class="param">-SkipRip</span> <span class="param">-DiscTitle</span> <span class="string">"MeinFilm"</span></pre>
+
+    <h2 id="verzeichnisse">Verzeichnisstruktur</h2>
+    <div class="dir-tree">
+        OutputDir/<br>
+        &nbsp;&nbsp;&lt;DiscTitle&gt;/<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;RAW/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">&lt;-- MKV-Rohdateien von MakeMKV</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;Encoded/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">&lt;-- Komprimierte Dateien von HandBrakeCLI</span>
+    </div>
+
+    <h2 id="logging">Logging</h2>
+    <ul>
+        <li>Log-Datei: <code>&lt;LogDir&gt;/DVDRip_&lt;Timestamp&gt;.log</code></li>
+        <li>Ohne <code>-DebugMode</code>: keine Stdout-Ausgabe außer der finalen Erfolgsmeldung</li>
+        <li>Mit <code>-DebugMode</code>: alle Log-Zeilen farbig auf Stdout, HandBrake-Fortschritt live</li>
+        <li>Das Log wird am Ende zusätzlich ins OutputDir kopiert</li>
+    </ul>
+
+    <h2 id="exitcodes">Exit-Codes</h2>
+    <table>
+        <tr><th>Code</th><th>Bedeutung</th></tr>
+        <tr><td><span class="exitcode-ok">0</span></td><td>Erfolg</td></tr>
+        <tr><td><span class="exitcode-err">1</span></td><td>Voraussetzungen fehlen (MakeMKV oder HandBrakeCLI nicht gefunden)</td></tr>
+        <tr><td><span class="exitcode-err">2</span></td><td>MakeMKV-Fehler oder keine MKV-Dateien erzeugt</td></tr>
+        <tr><td><span class="exitcode-err">3</span></td><td>HandBrakeCLI-Fehler</td></tr>
+        <tr><td><span class="exitcode-err">99</span></td><td>Unerwarteter Fehler</td></tr>
+    </table>
+
+    <h2 id="ablauf">Ablauf</h2>
+    <ol style="margin-left:1.4rem">
+        <li style="margin-bottom:.4rem">Voraussetzungen prüfen (MakeMKV, HandBrakeCLI)</li>
+        <li style="margin-bottom:.4rem">Disc-Titel und Laufwerksbuchstaben via MakeMKV info ermitteln</li>
+        <li style="margin-bottom:.4rem">Ziel- und Rip-Verzeichnisse anlegen</li>
+        <li style="margin-bottom:.4rem"><strong>Rippen:</strong> MakeMKV liest alle Titel ≥ MinLength als MKV in <code>RAW/</code></li>
+        <li style="margin-bottom:.4rem"><strong>Kodieren:</strong> HandBrakeCLI komprimiert jede MKV-Datei in den Disc-Ordner</li>
+        <li style="margin-bottom:.4rem">DVD auswerfen (sofern nicht <code>-NoEject</code>)</li>
+        <li style="margin-bottom:.4rem">Telegram-Abschlussbenachrichtigung senden</li>
+        <li style="margin-bottom:.4rem">Log ins OutputDir kopieren</li>
+        <li>Bei <code>-ServiceMode</code>: auf nächste DVD warten und Vorgang wiederholen</li>
+    </ol>
+
+    <h2 id="konfig">Konfig-Datei</h2>
+    <p>
+        Mit <code>-Config</code> kann eine JSON-Datei angegeben werden, die Standardwerte für
+        alle Parameter enthält. Das ermöglicht saubere Wrapper-Skripte ohne hartcodierte
+        Credentials. Explizit per CLI übergebene Parameter überschreiben den jeweiligen
+        Konfig-Wert. <code>OutputDir</code> kann wahlweise per CLI oder in der Konfig gesetzt werden —
+        fehlt es an beiden Stellen, bricht das Skript mit einem Fehler ab.
+    </p>
+    <p>
+        <strong>Auto-Erkennung:</strong> Wird <code>-Config</code> nicht angegeben, sucht das Skript
+        automatisch nach einer Datei namens <code>DVDRip.json</code> im aktuellen Arbeitsverzeichnis.
+        Wird sie gefunden, wird sie stillschweigend als Konfig-Datei verwendet.
+    </p>
+    <p>Musterdatei <code>DVDRip.json</code>:</p>
+    <pre>{
+    <span class="string">"OutputDir"</span>:      <span class="string">"C:\\Daten\\DVDs"</span>,
+    <span class="string">"TelegramToken"</span>:  <span class="string">"DEIN_BOT_TOKEN"</span>,
+    <span class="string">"TelegramChatId"</span>: <span class="string">"DEINE_CHAT_ID"</span>,
+    <span class="string">"ServiceMode"</span>:    true,
+    <span class="string">"PollInterval"</span>:   2,
+    <span class="string">"DebugMode"</span>:      true
+}</pre>
+    <p>
+        Alle Parameter aus der Tabelle können in der JSON-Datei verwendet werden.
+        Switch-Parameter (<code>DebugMode</code>, <code>ServiceMode</code> etc.) werden als
+        <code>true</code> / <code>false</code> angegeben.
+        Nicht aufgeführte Parameter behalten ihre Standardwerte.
+    </p>
+
+    <h2 id="servicemode">Service-Modus</h2>
+    <p>
+        Mit <code>-ServiceMode</code> läuft das Skript nach dem Verarbeiten einer DVD nicht aus,
+        sondern wartet automatisch auf die nächste eingelegte Disc. Die Erkennung erfolgt
+        zweistufig: primär über einen <strong>WMI-Event</strong> (sofortige Reaktion auf Laufwerks-
+        änderungen), als Fallback zusätzlich durch regelmäßiges <strong>Polling</strong>
+        im Abstand von <code>-PollInterval</code> Minuten (Standard: 5).
+    </p>
+    <p>
+        Dieser Modus eignet sich besonders für den unbeaufsichtigten Dauerbetrieb, z.&nbsp;B.
+        als Windows-Dienst via <code>Install-DVDRipService.ps1</code>. Telegram-Benachrichtigungen
+        werden dabei nach jeder verarbeiteten DVD gesendet, inklusive der Aufforderung,
+        die nächste Disc einzulegen.
+    </p>
+    <table>
+        <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
+        <tr><td><code>-ServiceMode</code> <span class="badge badge-switch">Switch</span></td><td><code>false</code></td><td>Dauerbetrieb aktivieren. Skript wartet nach jeder DVD auf die nächste (WMI-Event + Polling).</td></tr>
+        <tr><td><code>-PollInterval</code></td><td><code>5</code></td><td>Polling-Intervall in Minuten. Bestimmt, wie oft das Laufwerk zusätzlich zum WMI-Event abgefragt wird.</td></tr>
+    </table>
+
+</main>
+</body>
+</html>

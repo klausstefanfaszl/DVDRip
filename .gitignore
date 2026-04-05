@@ -1,0 +1,19 @@
+# Persönliche Konfigurationen mit Credentials
+DVDRip.bat
+DVDRip.json
+Publish-GitHub.bat
+DVDRip_dell.bat
+DVDRip_mT.bat
+DVDRip_oT.bat
+
+# Log-Dateien
+*.log
+
+# Temporäre und persönliche Dateien
+*.lnk
+mkv_err.txt
+mkv_info.txt
+spec.txt
+
+# Claude Code interne Projektdatei
+CLAUDE.md

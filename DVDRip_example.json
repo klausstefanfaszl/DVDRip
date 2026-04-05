@@ -1,0 +1,9 @@
+{
+    "OutputDir":      "C:\\Daten\\DVDs",
+    "TelegramToken":  "DEIN_BOT_TOKEN",
+    "TelegramChatId": "DEINE_CHAT_ID",
+    "ServiceMode":    true,
+    "PollInterval":   2,
+    "DebugMode":      true,
+    "MinMkvSizeMB":   500
+}
