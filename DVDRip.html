@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
     <meta charset="UTF-8">
@@ -39,12 +39,14 @@
         .toc a { color: #1a1a2e; text-decoration: none; }
         .toc a:hover { text-decoration: underline; }
         .toc li { margin-bottom: 0.2rem; }
+        .info-box { background: #eef6ff; border-left: 4px solid #3498db; border-radius: 0 6px 6px 0; padding: 0.8rem 1.1rem; margin-bottom: 1.2rem; }
+        .warn-box { background: #fff8ec; border-left: 4px solid #f39c12; border-radius: 0 6px 6px 0; padding: 0.8rem 1.1rem; margin-bottom: 1.2rem; }
     </style>
 </head>
 <body>
 
 <header>
-    <h1>DVDRip <span style="font-size:1rem;font-weight:400;opacity:.7">v1.2</span></h1>
+    <h1>DVDRip <span style="font-size:1rem;font-weight:400;opacity:.7">v1.3</span></h1>
     <p>PowerShell-Skript zum automatisierten Rippen und Komprimieren von DVDs</p>
 </header>
 
@@ -63,6 +65,7 @@
             <li><a href="#exitcodes">Exit-Codes</a></li>
             <li><a href="#ablauf">Ablauf</a></li>
             <li><a href="#servicemode">Service-Modus</a></li>
+            <li><a href="#service-install">Dienst installieren</a></li>
             <li><a href="#konfig">Konfig-Datei</a></li>
         </ul>
     </div>
@@ -80,15 +83,18 @@
         <tr><th>Tool</th><th>Standard-Pfad</th></tr>
         <tr><td><strong>MakeMKV</strong></td><td><code>C:\Program Files (x86)\MakeMKV\makemkvcon.exe</code><br>oder <code>C:\Program Files\MakeMKV\makemkvcon.exe</code> (auto-detect)</td></tr>
         <tr><td><strong>HandBrakeCLI</strong></td><td><code>C:\Program Files\HandbrakeCLI\HandBrakeCLI.exe</code></td></tr>
+        <tr><td><strong>NSSM</strong> (nur für Dienst)</td><td>Wird automatisch heruntergeladen falls nicht vorhanden</td></tr>
     </table>
 
     <h2 id="dateien">Dateien</h2>
     <table>
         <tr><th>Datei</th><th>Beschreibung</th></tr>
         <tr><td><code>DVDRip.ps1</code></td><td>Hauptskript</td></tr>
-        <tr><td><code>DVDRip.bat</code></td><td>Einsatzbereiter Wrapper mit allen projektspezifischen Einstellungen (OutputDir, Telegram)</td></tr>
+        <tr><td><code>DVDRip.bat</code></td><td>Einsatzbereiter Wrapper mit projektspezifischen Einstellungen (OutputDir, Telegram-Credentials)</td></tr>
         <tr><td><code>DVDRip_example.bat</code></td><td>Vorlage mit kommentierten Parameterbeispielen, ohne Token-Informationen</td></tr>
-        <tr><td><code>DVDRip_example.json</code></td><td>Musterkonfig-Datei für alle Parameter (ohne Credentials) – als <code>DVDRip.json</code> kopieren und anpassen</td></tr>
+        <tr><td><code>DVDRip.json</code></td><td>Konfig-Datei (nicht im Repository – enthält Credentials). Wird von DVDRip.bat und Install-DVDRipService.bat verwendet.</td></tr>
+        <tr><td><code>Install-DVDRipService.ps1</code></td><td>Installiert DVDRip als Windows-Dienst via NSSM</td></tr>
+        <tr><td><code>Install-DVDRipService.bat</code></td><td>Interaktiver Wrapper für die Dienst-Installation und -Deinstallation. Liest Parameter aus <code>DVDRip.json</code>. Muss als Administrator ausgeführt werden.</td></tr>
         <tr><td><code>DVDRip.html</code></td><td>Diese Dokumentation</td></tr>
         <tr><td><code>README.md</code></td><td>Kurzreferenz</td></tr>
     </table>
@@ -106,8 +112,8 @@
         <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
         <tr><td><code>-OutputDir</code> <span class="badge badge-required">Pflicht*</span></td><td>–</td><td>Zielverzeichnis. Darunter wird automatisch ein Unterordner pro DVD angelegt. Kann alternativ über die Konfig-Datei angegeben werden.</td></tr>
         <tr><td><code>-DiscTitle</code></td><td>auto</td><td>Name des DVD-Unterordners. Wird automatisch aus dem Disc-Inhalt ermittelt, falls nicht angegeben.</td></tr>
-        <tr><td><code>-LogDir</code></td><td>OutputDir</td><td>Basisverzeichnis für Log-Dateien. Wird als Basis verwendet wenn <code>-LogFile</code> einen relativen Pfad enthält.</td></tr>
-        <tr><td><code>-LogFile</code></td><td>–</td><td>Dateiname oder Pfad der Log-Datei (Append-Modus). Absoluter Pfad wird direkt verwendet; relativer Pfad wird mit <code>-LogDir</code> (bzw. OutputDir) kombiniert. Ohne Angabe wird ein neues Timestamped-File in OutputDir angelegt.</td></tr>
+        <tr><td><code>-LogDir</code></td><td>OutputDir</td><td>Basisverzeichnis für Log-Dateien.</td></tr>
+        <tr><td><code>-LogFile</code></td><td>–</td><td>Dateiname oder Pfad der Log-Datei (Append-Modus). Absoluter Pfad wird direkt verwendet; relativer Pfad wird mit <code>-LogDir</code> kombiniert. Ohne Angabe wird eine neue Timestamped-Datei in OutputDir angelegt.</td></tr>
         <tr><td><code>-TempDir</code></td><td>%TEMP%</td><td>Lokales Zwischenverzeichnis für Rip und Encoding bei Netzwerk-OutputDir.</td></tr>
     </table>
 
@@ -116,14 +122,14 @@
         <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
         <tr><td><code>-DriveIndex</code></td><td><code>0</code></td><td>MakeMKV-Laufwerksindex. Einzelner Wert oder kommagetrennte Liste für mehrere Laufwerke (<code>-DriveIndex 0,1</code>). Bei mehreren Laufwerken werden diese sequenziell verarbeitet. Im Service-Modus werden alle angegebenen Laufwerke überwacht.</td></tr>
         <tr><td><code>-MinLength</code></td><td><code>1800</code></td><td>Minimale Titellänge in Sekunden. Kürzere Titel werden übersprungen.</td></tr>
-        <tr><td><code>-MinMkvSizeMB</code></td><td><code>500</code></td><td>Minimale MKV-Dateigröße in MB. Bricht MakeMKV mit einem Fehler ab, aber die größte erzeugte Datei ist mindestens so groß, wird der Fehler ignoriert und HandBrakeCLI trotzdem gestartet. Typisch bei Lesefehlern am Ende der Disc.</td></tr>
+        <tr><td><code>-MinMkvSizeMB</code></td><td><code>500</code></td><td>Minimale MKV-Dateigröße in MB. Bricht MakeMKV mit einem Fehler ab, ist aber die größte erzeugte Datei mindestens so groß, wird der Fehler ignoriert und HandBrakeCLI trotzdem gestartet. Typisch bei Lesefehlern am Ende der Disc.</td></tr>
         <tr><td><code>-MakeMKVPath</code></td><td>auto</td><td>Pfad zu <code>makemkvcon.exe</code>. Wird automatisch erkannt falls leer.</td></tr>
     </table>
 
     <h3>HandBrakeCLI</h3>
     <table>
         <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
-        <tr><td><code>-HBPreset</code></td><td><code>HQ 576p25 Surround</code></td><td>HandBrakeCLI-Preset (ab v1.11). Leer = kein Preset. Ausgabe-Container wird automatisch aus dem Preset-Namen abgeleitet (MKV wenn Name „MKV" enthält, sonst MP4).</td></tr>
+        <tr><td><code>-HBPreset</code></td><td><code>H.265 MP4 576p25</code></td><td>HandBrakeCLI-Preset. Ausgabe-Container wird automatisch aus dem Preset-Namen abgeleitet (MKV wenn Name „MKV" enthält, sonst MP4).</td></tr>
         <tr><td><code>-HBQuality</code></td><td><code>22</code></td><td>RF-Qualitätsfaktor. Kleinere Werte = bessere Qualität, größere Datei.</td></tr>
         <tr><td><code>-HBExtraArgs</code></td><td>–</td><td>Zusätzliche HandBrakeCLI-Argumente als einzelner String.</td></tr>
         <tr><td><code>-HandBrakePath</code></td><td>siehe oben</td><td>Pfad zu <code>HandBrakeCLI.exe</code>.</td></tr>
@@ -132,7 +138,7 @@
     <h3>Schalter</h3>
     <table>
         <tr><th>Parameter</th><th>Beschreibung</th></tr>
-        <tr><td><code>-DebugMode</code> <span class="badge badge-switch">Switch</span></td><td>Alle Log-Zeilen farbig auf Stdout ausgeben. HandBrake-Fortschritt wird live gestreamt.</td></tr>
+        <tr><td><code>-DebugMode</code> <span class="badge badge-switch">Switch</span></td><td>Alle Log-Zeilen farbig auf Stdout ausgeben. HandBrake-Fortschritt wird live gestreamt. Aktiviert außerdem detaillierte DEBUG-Einträge in der Log-Datei.</td></tr>
         <tr><td><code>-SkipRip</code> <span class="badge badge-switch">Switch</span></td><td>MakeMKV-Schritt überspringen. Nützlich wenn MKV-Dateien bereits vorhanden sind.</td></tr>
         <tr><td><code>-SkipEncode</code> <span class="badge badge-switch">Switch</span></td><td>HandBrakeCLI-Schritt überspringen. Nur rippen, nicht kodieren.</td></tr>
         <tr><td><code>-NoEject</code> <span class="badge badge-switch">Switch</span></td><td>DVD nach Abschluss <strong>nicht</strong> auswerfen. Standard: DVD wird automatisch ausgeworfen.</td></tr>
@@ -142,7 +148,7 @@
     <h3>Service-Modus</h3>
     <table>
         <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
-        <tr><td><code>-PollInterval</code></td><td><code>5</code></td><td>Polling-Intervall in Minuten, mit dem im Service-Modus auf eine neue DVD geprüft wird. Nur relevant bei aktiver <code>-ServiceMode</code>-Option.</td></tr>
+        <tr><td><code>-PollInterval</code></td><td><code>5</code></td><td>Polling-Intervall in Minuten, mit dem im Service-Modus auf eine neue DVD geprüft wird.</td></tr>
     </table>
 
     <h3>Telegram</h3>
@@ -151,7 +157,7 @@
         <tr><td><code>-TelegramToken</code></td><td>Bot-Token. Leer = keine Benachrichtigungen.</td></tr>
         <tr><td><code>-TelegramChatId</code></td><td>Chat-ID des Empfängers.</td></tr>
     </table>
-    <p>Benachrichtigungen werden gesendet bei: Start, Rip-abgeschlossen, Kodierung-abgeschlossen, Fehler und Fertig ("Bitte nächste DVD einlegen").</p>
+    <p>Benachrichtigungen werden gesendet bei: Start, Rip abgeschlossen, Kodierung abgeschlossen, Fehler und Fertig ("Bitte nächste DVD einlegen").</p>
 
     <h2 id="beispiele">Beispiele</h2>
 
@@ -177,7 +183,7 @@
     <h3>Ohne automatischen Auswurf</h3>
     <pre>.\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-NoEject</span></pre>
 
-    <h3>Zwei Laufwerke gleichzeitig befüllen</h3>
+    <h3>Zwei Laufwerke</h3>
     <pre><span class="comment"># Einzel-Modus: Laufwerk 0 dann Laufwerk 1 sequenziell verarbeiten</span>
 .\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-DriveIndex</span> 0,1
 
@@ -188,11 +194,11 @@
     <pre><span class="comment"># Einmal starten – läuft nach jeder DVD weiter und wartet auf die nächste</span>
 .\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-ServiceMode</span>
 
-<span class="comment"># Polling alle 2 Minuten statt der Standard-5-Minuten</span>
+<span class="comment"># Polling alle 2 Minuten statt Standard (5 Minuten)</span>
 .\DVDRip.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-ServiceMode</span> <span class="param">-PollInterval</span> 2</pre>
 
     <h3>Über den Wrapper</h3>
-    <pre><span class="comment">:: Einfachster Aufruf - alle Einstellungen stehen in DVDRip.bat</span>
+    <pre><span class="comment">:: Einfachster Aufruf – alle Einstellungen stehen in DVDRip.bat</span>
 DVDRip.bat
 
 <span class="comment">:: Zusätzliche Parameter durchreichen</span>
@@ -209,10 +215,13 @@ DVDRip.bat <span class="param">-SkipRip</span> <span class="param">-DiscTitle</s
 
     <h2 id="logging">Logging</h2>
     <ul>
-        <li>Log-Datei: <code>&lt;LogDir&gt;/DVDRip_&lt;Timestamp&gt;.log</code></li>
-        <li>Ohne <code>-DebugMode</code>: keine Stdout-Ausgabe außer der finalen Erfolgsmeldung</li>
+        <li>Log-Datei: <code>&lt;LogDir&gt;/DVDRip_&lt;Timestamp&gt;.log</code> (oder per <code>-LogFile</code> festgelegt)</li>
+        <li>Ohne <code>-DebugMode</code>: keine Stdout-Ausgabe außer der finalen Abschlussmeldung</li>
         <li>Mit <code>-DebugMode</code>: alle Log-Zeilen farbig auf Stdout, HandBrake-Fortschritt live</li>
+        <li><strong>DEBUG-Einträge</strong> (z.B. STDOUT/STDERR-Zeilen externer Prozesse) werden nur bei aktivem <code>-DebugMode</code> in die Log-Datei geschrieben</li>
+        <li><strong>Encoding-Details</strong> (pro-Datei-Meldungen, RAW-Löschung, Datei-Verschiebung) erscheinen ebenfalls nur im Debug-Modus im Log. Im Normalbetrieb werden nur Start und Ende des gesamten Encoding-Vorgangs protokolliert.</li>
         <li>Das Log wird am Ende zusätzlich ins OutputDir kopiert</li>
+        <li>Abschlussmeldung: <code>ERFOLG - '&lt;Filmtitel&gt;' beendet nach HH:MM:SS. Log: ...</code></li>
     </ul>
 
     <h2 id="exitcodes">Exit-Codes</h2>
@@ -232,61 +241,119 @@ DVDRip.bat <span class="param">-SkipRip</span> <span class="param">-DiscTitle</s
         <li style="margin-bottom:.4rem">Ziel- und Rip-Verzeichnisse anlegen</li>
         <li style="margin-bottom:.4rem"><strong>Rippen:</strong> MakeMKV liest alle Titel ≥ MinLength als MKV in <code>RAW/</code></li>
         <li style="margin-bottom:.4rem"><strong>Kodieren:</strong> HandBrakeCLI komprimiert jede MKV-Datei in den Disc-Ordner</li>
+        <li style="margin-bottom:.4rem">RAW-Verzeichnis löschen</li>
         <li style="margin-bottom:.4rem">DVD auswerfen (sofern nicht <code>-NoEject</code>)</li>
         <li style="margin-bottom:.4rem">Telegram-Abschlussbenachrichtigung senden</li>
         <li style="margin-bottom:.4rem">Log ins OutputDir kopieren</li>
         <li>Bei <code>-ServiceMode</code>: auf nächste DVD warten und Vorgang wiederholen</li>
     </ol>
 
-    <h2 id="konfig">Konfig-Datei</h2>
-    <p>
-        Mit <code>-Config</code> kann eine JSON-Datei angegeben werden, die Standardwerte für
-        alle Parameter enthält. Das ermöglicht saubere Wrapper-Skripte ohne hartcodierte
-        Credentials. Explizit per CLI übergebene Parameter überschreiben den jeweiligen
-        Konfig-Wert. <code>OutputDir</code> kann wahlweise per CLI oder in der Konfig gesetzt werden —
-        fehlt es an beiden Stellen, bricht das Skript mit einem Fehler ab.
-    </p>
-    <p>
-        <strong>Auto-Erkennung:</strong> Wird <code>-Config</code> nicht angegeben <em>und werden keine weiteren Parameter übergeben</em>,
-        sucht das Skript automatisch nach einer Datei namens <code>DVDRip.json</code> im aktuellen Arbeitsverzeichnis.
-        Wird sie gefunden, wird sie als Konfig-Datei verwendet. Sobald mindestens ein Parameter explizit angegeben wird,
-        entfällt die Auto-Erkennung — die Config muss dann bei Bedarf explizit mit <code>-Config</code> angegeben werden.
-    </p>
-    <p>Musterdatei <code>DVDRip.json</code>:</p>
-    <pre>{
-    <span class="string">"OutputDir"</span>:      <span class="string">"C:\\Daten\\DVDs"</span>,
-    <span class="string">"TelegramToken"</span>:  <span class="string">"DEIN_BOT_TOKEN"</span>,
-    <span class="string">"TelegramChatId"</span>: <span class="string">"DEINE_CHAT_ID"</span>,
-    <span class="string">"ServiceMode"</span>:    true,
-    <span class="string">"PollInterval"</span>:   2,
-    <span class="string">"DebugMode"</span>:      true
-}</pre>
-    <p>
-        Alle Parameter aus der Tabelle können in der JSON-Datei verwendet werden.
-        Switch-Parameter (<code>DebugMode</code>, <code>ServiceMode</code> etc.) werden als
-        <code>true</code> / <code>false</code> angegeben.
-        Nicht aufgeführte Parameter behalten ihre Standardwerte.
-    </p>
-
     <h2 id="servicemode">Service-Modus</h2>
     <p>
         Mit <code>-ServiceMode</code> läuft das Skript nach dem Verarbeiten einer DVD nicht aus,
         sondern wartet automatisch auf die nächste eingelegte Disc. Die Erkennung erfolgt
-        zweistufig: primär über einen <strong>WMI-Event</strong> (sofortige Reaktion auf Laufwerks-
-        änderungen), als Fallback zusätzlich durch regelmäßiges <strong>Polling</strong>
+        zweistufig: primär über einen <strong>WMI-Event</strong> (sofortige Reaktion auf Laufwerksänderungen),
+        als Fallback zusätzlich durch regelmäßiges <strong>Polling</strong>
         im Abstand von <code>-PollInterval</code> Minuten (Standard: 5).
     </p>
     <p>
-        Dieser Modus eignet sich besonders für den unbeaufsichtigten Dauerbetrieb, z.&nbsp;B.
-        als Windows-Dienst via <code>Install-DVDRipService.ps1</code>. Telegram-Benachrichtigungen
-        werden dabei nach jeder verarbeiteten DVD gesendet, inklusive der Aufforderung,
-        die nächste Disc einzulegen.
+        Telegram-Benachrichtigungen werden nach jeder verarbeiteten DVD gesendet,
+        inklusive der Aufforderung, die nächste Disc einzulegen.
     </p>
     <table>
         <tr><th>Parameter</th><th>Standard</th><th>Beschreibung</th></tr>
         <tr><td><code>-ServiceMode</code> <span class="badge badge-switch">Switch</span></td><td><code>false</code></td><td>Dauerbetrieb aktivieren. Skript wartet nach jeder DVD auf die nächste (WMI-Event + Polling).</td></tr>
         <tr><td><code>-PollInterval</code></td><td><code>5</code></td><td>Polling-Intervall in Minuten. Bestimmt, wie oft das Laufwerk zusätzlich zum WMI-Event abgefragt wird.</td></tr>
     </table>
+
+    <h2 id="service-install">Dienst installieren</h2>
+    <p>
+        Mit <code>Install-DVDRipService.bat</code> lässt sich DVDRip als automatisch startbereiter
+        Windows-Dienst einrichten. Die Parameter werden direkt aus <code>DVDRip.json</code> gelesen –
+        Telegram-Credentials und HBPreset müssen nicht manuell angegeben werden.
+    </p>
+
+    <div class="info-box">
+        <strong>Voraussetzung:</strong> <code>Install-DVDRipService.bat</code> muss als <strong>Administrator</strong> ausgeführt werden.
+        NSSM wird automatisch heruntergeladen falls nicht vorhanden.
+    </div>
+
+    <h3>Installation / Deinstallation</h3>
+    <p>Beim Start erscheint ein Auswahlmenü:</p>
+    <pre><span class="comment"> [1] Dienst installieren
+ [2] Dienst deinstallieren
+
+Auswahl (1/2):</span></pre>
+
+    <h3>Verhalten nach der Installation</h3>
+    <ul>
+        <li>Der Dienst wird registriert mit Starttyp <strong>Manuell</strong> – er startet nicht automatisch</li>
+        <li>Der Dienst wird nach der Installation <strong>nicht sofort gestartet</strong></li>
+        <li>Start/Stop manuell über die Windows-Dienstverwaltung oder per PowerShell:</li>
+    </ul>
+    <pre>Start-Service DVDRip
+Stop-Service  DVDRip</pre>
+
+    <h3>Konfiguration des Dienstes</h3>
+    <p>
+        Der installierte Dienst startet DVDRip.ps1 mit <code>-ServiceMode</code> und
+        <code>-Config "DVDRip.json"</code>. Alle weiteren Parameter (HBPreset, Telegram-Credentials,
+        PollInterval usw.) werden zur Laufzeit aus der JSON-Datei gelesen. Das vermeidet
+        Quoting-Probleme bei Werten mit Leerzeichen und hält die Dienst-Konfiguration
+        in der Registry minimal.
+    </p>
+    <div class="warn-box">
+        Änderungen in <code>DVDRip.json</code> werden erst nach einem Neustart des Dienstes wirksam.
+    </div>
+
+    <h3>NSSM-Logs</h3>
+    <p>NSSM schreibt Stdout/Stderr des Dienstes in den OutputDir:</p>
+    <ul>
+        <li><code>&lt;OutputDir&gt;\DVDRip_service_stdout.log</code></li>
+        <li><code>&lt;OutputDir&gt;\DVDRip_service_stderr.log</code></li>
+    </ul>
+    <p>Log-Rotation ab 10 MB, Neustart-Verzögerung 5 Sekunden bei unerwartetem Beenden.</p>
+
+    <h3>Direkter Aufruf von Install-DVDRipService.ps1</h3>
+    <pre><span class="comment"># Installation mit expliziten Parametern (ohne BAT)</span>
+.\Install-DVDRipService.ps1 <span class="param">-OutputDir</span> <span class="string">"D:\Videos"</span> <span class="param">-ConfigPath</span> <span class="string">".\DVDRip.json"</span>
+
+<span class="comment"># Deinstallation</span>
+.\Install-DVDRipService.ps1 <span class="param">-Uninstall</span>
+
+<span class="comment"># NSSM-Editor öffnen</span>
+nssm edit DVDRip</pre>
+
+    <h2 id="konfig">Konfig-Datei</h2>
+    <p>
+        Mit <code>-Config</code> kann eine JSON-Datei angegeben werden, die Standardwerte für
+        alle Parameter enthält. Das ermöglicht saubere Wrapper-Skripte ohne hartcodierte
+        Credentials. Explizit per CLI übergebene Parameter überschreiben den jeweiligen
+        Konfig-Wert.
+    </p>
+    <p>
+        <strong>Auto-Erkennung:</strong> Wird <code>-Config</code> nicht angegeben <em>und werden keine weiteren Parameter übergeben</em>,
+        sucht das Skript automatisch nach einer Datei namens <code>DVDRip.json</code> im aktuellen Arbeitsverzeichnis.
+        Wird sie gefunden, wird sie als Konfig-Datei verwendet. Sobald mindestens ein Parameter explizit angegeben wird,
+        entfällt die Auto-Erkennung — <code>-Config</code> muss dann bei Bedarf explizit angegeben werden.
+    </p>
+    <p>Beispiel <code>DVDRip.json</code>:</p>
+    <pre>{
+    <span class="string">"OutputDir"</span>:      <span class="string">"C:\\Daten\\DVDs"</span>,
+    <span class="string">"TelegramToken"</span>:  <span class="string">"DEIN_BOT_TOKEN"</span>,
+    <span class="string">"TelegramChatId"</span>: <span class="string">"DEINE_CHAT_ID"</span>,
+    <span class="string">"ServiceMode"</span>:    true,
+    <span class="string">"PollInterval"</span>:   2,
+    <span class="string">"HBPreset"</span>:       <span class="string">"H.265 MP4 576p25"</span>,
+    <span class="string">"HBQuality"</span>:      22,
+    <span class="string">"DebugMode"</span>:      false
+}</pre>
+    <p>
+        Alle Parameter aus den Tabellen können in der JSON-Datei verwendet werden.
+        Switch-Parameter (<code>DebugMode</code>, <code>ServiceMode</code> etc.) werden als
+        <code>true</code> / <code>false</code> angegeben.
+        Nicht aufgeführte Parameter behalten ihre Standardwerte.
+    </p>
 
 </main>
 </body>

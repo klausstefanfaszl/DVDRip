@@ -68,6 +68,9 @@ param(
     [int]$HBQuality = 22,
 
     [Parameter(Mandatory = $false)]
+    [string]$ConfigPath = "",
+
+    [Parameter(Mandatory = $false)]
     [switch]$Uninstall
 )
 
@@ -185,44 +188,41 @@ if ($existingSvc) {
     Start-Sleep -Seconds 2
 }
 
-# PowerShell-Argumente für DVDRip zusammenstellen
+# PowerShell-Argumente für DVDRip zusammenstellen.
+# Wenn eine ConfigPath angegeben ist, werden alle Parameter daraus gelesen –
+# das vermeidet Quoting-Probleme bei Werten mit Leerzeichen (z.B. HBPreset).
 $psArgs  = "-NoProfile -ExecutionPolicy Bypass -File `"$DVDRipScript`""
-$psArgs += " -OutputDir `"$OutputDir`""
 $psArgs += " -ServiceMode"
-$psArgs += " -PollInterval $PollInterval"
-$psArgs += " -HBPreset `"$HBPreset`""
-$psArgs += " -HBQuality $HBQuality"
 
-if ($TelegramToken)  { $psArgs += " -TelegramToken `"$TelegramToken`"" }
-if ($TelegramChatId) { $psArgs += " -TelegramChatId `"$TelegramChatId`"" }
+if ($ConfigPath) {
+    $psArgs += " -Config `"$ConfigPath`""
+} else {
+    $psArgs += " -OutputDir `"$OutputDir`""
+    $psArgs += " -PollInterval $PollInterval"
+    $psArgs += " -HBQuality $HBQuality"
+    if ($HBPreset)       { $psArgs += " -HBPreset `"$HBPreset`"" }
+    if ($TelegramToken)  { $psArgs += " -TelegramToken `"$TelegramToken`"" }
+    if ($TelegramChatId) { $psArgs += " -TelegramChatId `"$TelegramChatId`"" }
+}
 
 $powershellExe = (Get-Command powershell.exe).Source
 
 Write-Step "Registriere Dienst '$ServiceName' ..."
-& $nssm install $ServiceName $powershellExe $psArgs 2>&1 | Out-Null
+& $nssm install $ServiceName $powershellExe 2>&1 | Out-Null
+& $nssm set    $ServiceName AppParameters $psArgs 2>&1 | Out-Null
 
 # Dienst konfigurieren
 Write-Step "Konfiguriere Dienst ..."
 & $nssm set $ServiceName DisplayName  "DVDRip Service"                         2>&1 | Out-Null
 & $nssm set $ServiceName Description  "Automatisches DVD-Rippen und Komprimieren" 2>&1 | Out-Null
-& $nssm set $ServiceName Start        SERVICE_AUTO_START                           2>&1 | Out-Null
+& $nssm set $ServiceName Start        SERVICE_DEMAND_START                        2>&1 | Out-Null
 & $nssm set $ServiceName AppStdout    (Join-Path $OutputDir "DVDRip_service_stdout.log") 2>&1 | Out-Null
 & $nssm set $ServiceName AppStderr    (Join-Path $OutputDir "DVDRip_service_stderr.log") 2>&1 | Out-Null
 & $nssm set $ServiceName AppRotateFiles    1   2>&1 | Out-Null
 & $nssm set $ServiceName AppRotateBytes    10485760 2>&1 | Out-Null  # 10 MB
 & $nssm set $ServiceName AppRestartDelay   5000 2>&1 | Out-Null      # 5s Pause vor Neustart
 
-Write-Step "Starte Dienst ..."
-& $nssm start $ServiceName 2>&1 | Out-Null
-Start-Sleep -Seconds 2
-
-$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($svc -and $svc.Status -eq "Running") {
-    Write-Ok "Dienst '$ServiceName' läuft."
-} else {
-    Write-Host "  [WARN] Dienst gestartet, Status: $($svc.Status)" -ForegroundColor Yellow
-    Write-Host "         Prüfe: Get-Service $ServiceName" -ForegroundColor Yellow
-}
+Write-Ok "Dienst '$ServiceName' installiert (Starttyp: Manuell)."
 
 Write-Host "`nInstallation abgeschlossen." -ForegroundColor Green
 Write-Host "  Dienst verwalten:" -ForegroundColor Gray

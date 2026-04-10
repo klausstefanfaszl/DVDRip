@@ -286,8 +286,8 @@ function Write-Log {
     $ts   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = "[$ts] [$Level] $Message"
 
-    # Immer in Log-Datei schreiben
-    if ($Script:LogPath) {
+    # DEBUG nur bei aktivem DebugMode in Log-Datei schreiben
+    if ($Script:LogPath -and ($Level -ne "DEBUG" -or $DebugMode)) {
         Add-Content -Path $Script:LogPath -Value $line -Encoding UTF8
     }
 
@@ -355,10 +355,11 @@ function Invoke-ExternalProcess {
         [string]$Executable,
         [string[]]$Arguments,
         [string]$StepName,
-        [switch]$StreamProgress   # Ausgabe live streamen (z.B. für HandBrakeCLI)
+        [switch]$StreamProgress,  # Ausgabe live streamen (z.B. für HandBrakeCLI)
+        [string]$StartLogLevel = "INFO"
     )
 
-    Write-Log "INFO" "Starte $StepName`: $Executable $($Arguments -join ' ')"
+    Write-Log $StartLogLevel "Starte $StepName`: $Executable $($Arguments -join ' ')"
 
     if ($StreamProgress) {
         $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -523,6 +524,90 @@ function Sanitize-FolderName {
 }
 
 # ---------------------------------------------------------------------------
+# Ausstehende Kodierungen aufarbeiten
+# ---------------------------------------------------------------------------
+function Invoke-PendingEncodes {
+    # Prüft OutputDir auf RAW-Unterverzeichnisse mit vollständigem Rip
+    # (_rip_complete vorhanden) und noch nicht kodierten MKV-Dateien.
+    # Falls gefunden, wird HandBrakeCLI gestartet bevor der normale Ablauf beginnt.
+    if (-not $OutputDir -or -not (Test-Path $OutputDir)) { return }
+    if ($SkipEncode) { return }
+
+    $outExt    = if ($HBPreset -match '\bMKV\b') { ".mkv" } else { ".mp4" }
+    $discDirs  = @(Get-ChildItem -Path $OutputDir -Directory -ErrorAction SilentlyContinue)
+    $anyFound  = $false
+
+    foreach ($discDir in $discDirs) {
+        $rawDir    = Join-Path $discDir.FullName "RAW"
+        $ripMarker = Join-Path $rawDir "_rip_complete"
+
+        if (-not (Test-Path $ripMarker)) { continue }
+
+        $mkvFiles = @(Get-ChildItem -Path $rawDir -Filter "*.mkv" -Recurse -ErrorAction SilentlyContinue)
+        if ($mkvFiles.Count -eq 0) { continue }
+
+        if (-not $anyFound) {
+            Write-Log "INFO" "Prüfe auf ausstehende Kodierungen in: $OutputDir"
+            $anyFound = $true
+        }
+
+        $folderName = $discDir.Name
+        Write-Log "INFO" "Ausstehende Kodierung gefunden: '$folderName' ($($mkvFiles.Count) MKV-Datei(en)) – starte HandBrakeCLI."
+        Send-TelegramMessage "Ausstehende Kodierung: <b>$folderName</b> ($($mkvFiles.Count) Titel). HandBrakeCLI gestartet..."
+
+        if (-not (Test-Path $HandBrakePath)) {
+            Write-Log "WARN" "HandBrakeCLI nicht gefunden ($HandBrakePath) – ausstehende Kodierung übersprungen."
+            return
+        }
+
+        $baseName     = $folderName -replace '\s+', '_'
+        $encodeErrors = 0
+        $fileIndex    = 1
+
+        foreach ($mkv in $mkvFiles) {
+            $suffix  = if ($mkvFiles.Count -gt 1) { "_$($fileIndex.ToString('D2'))" } else { "" }
+            $outFile = Join-Path $discDir.FullName ($baseName + $suffix + $outExt)
+            $fileIndex++
+
+            if (Test-Path $outFile) {
+                Write-Log "INFO" "Ausgabedatei bereits vorhanden, überspringe: $([System.IO.Path]::GetFileName($outFile))"
+                continue
+            }
+
+            $hbArgs = [System.Collections.Generic.List[string]]::new()
+            $hbArgs.Add("-i `"$($mkv.FullName)`"")
+            $hbArgs.Add("-o `"$outFile`"")
+            $hbArgs.Add("-q $HBQuality")
+            if ($HBPreset)    { $hbArgs.Add("--preset `"$HBPreset`"") }
+            if ($HBExtraArgs) { $hbArgs.Add($HBExtraArgs) }
+
+            $hbResult = Invoke-ExternalProcess `
+                -Executable $HandBrakePath `
+                -Arguments $hbArgs.ToArray() `
+                -StepName "HandBrakeCLI Nachkodierung [$($mkv.Name)]" `
+                -StreamProgress:$DebugMode `
+                -StartLogLevel "DEBUG"
+
+            if ($hbResult.ExitCode -ne 0) {
+                Write-Log "ERROR" "Nachkodierung fehlgeschlagen für '$($mkv.Name)' (ExitCode: $($hbResult.ExitCode))"
+                $encodeErrors++
+            } else {
+                Write-Log "DEBUG" "Nachkodierung erfolgreich: '$($mkv.Name)' → '$([System.IO.Path]::GetFileName($outFile))'"
+            }
+        }
+
+        if ($encodeErrors -eq 0) {
+            Write-Log "INFO" "Nachkodierung '$folderName' abgeschlossen. Lösche RAW-Verzeichnis."
+            Remove-Item -Path $rawDir -Recurse -Force -ErrorAction SilentlyContinue
+            Send-TelegramMessage "Nachkodierung <b>$folderName</b> abgeschlossen. RAW gelöscht."
+        } else {
+            Write-Log "ERROR" "Nachkodierung '$folderName': $encodeErrors Fehler – RAW-Verzeichnis bleibt erhalten."
+            Send-TelegramMessage "Nachkodierung <b>$folderName</b>: $encodeErrors Fehler aufgetreten."
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Hauptlogik
 # ---------------------------------------------------------------------------
 function Main {
@@ -533,6 +618,9 @@ function Main {
 
     Write-Log "INFO" "=== $Script:ScriptName v$Script:Version gestartet ==="
     Send-TelegramMessage "DVD-Import gestartet$(if ($DiscTitle) { ": <b>$DiscTitle</b>" })"
+
+    # 1b. Ausstehende Kodierungen aus vorherigen Läufen aufarbeiten
+    Invoke-PendingEncodes
 
     # 2. Voraussetzungen prüfen
     Write-Log "INFO" "Prüfe Voraussetzungen ..."
@@ -637,18 +725,19 @@ function Main {
                 if ($HBPreset)    { $hbArgs.Add("--preset `"$HBPreset`"") }
                 if ($HBExtraArgs) { $hbArgs.Add($HBExtraArgs) }
 
-                Write-Log "INFO" "Konvertiere: '$($mkv.Name)' → '$([System.IO.Path]::GetFileName($outFile))'"
+                Write-Log "DEBUG" "Konvertiere: '$($mkv.Name)' → '$([System.IO.Path]::GetFileName($outFile))'"
                 $hbResult = Invoke-ExternalProcess `
                     -Executable $HandBrakePath `
                     -Arguments $hbArgs.ToArray() `
                     -StepName "HandBrakeCLI Konvertierung [$($mkv.Name)]" `
-                    -StreamProgress:$DebugMode
+                    -StreamProgress:$DebugMode `
+                    -StartLogLevel "DEBUG"
 
                 if ($hbResult.ExitCode -ne 0) {
                     Write-Log "ERROR" "Konvertierung fehlgeschlagen für '$($mkv.Name)' (ExitCode: $($hbResult.ExitCode))"
                     $convertErr++
                 } else {
-                    Write-Log "INFO" "Konvertierung erfolgreich: '$($mkv.Name)' gelöscht."
+                    Write-Log "DEBUG" "Konvertierung erfolgreich: '$($mkv.Name)' gelöscht."
                     Remove-Item -Path $mkv.FullName -Force -ErrorAction SilentlyContinue
                     $convertOk++
                 }
@@ -793,13 +882,14 @@ function Main {
                 -Executable $HandBrakePath `
                 -Arguments $hbArgs.ToArray() `
                 -StepName "HandBrakeCLI [$($mkv.Name)]" `
-                -StreamProgress:$DebugMode
+                -StreamProgress:$DebugMode `
+                -StartLogLevel "DEBUG"
 
             if ($hbResult.ExitCode -ne 0) {
                 Write-Log "ERROR" "HandBrakeCLI fehlgeschlagen für '$($mkv.Name)' (ExitCode: $($hbResult.ExitCode))"
                 $encodeErrors++
             } else {
-                Write-Log "INFO" "Kodierung erfolgreich: '$($mkv.Name)' -> '$outFile'"
+                Write-Log "DEBUG" "Kodierung erfolgreich: '$($mkv.Name)' -> '$outFile'"
             }
         }
 
@@ -811,23 +901,23 @@ function Main {
             Write-Log "INFO" "Alle Dateien erfolgreich kodiert."
 
             # RAW-Verzeichnis löschen
-            Write-Log "INFO" "Lösche RAW-Verzeichnis: $ripDir"
+            Write-Log "DEBUG" "Lösche RAW-Verzeichnis: $ripDir"
             Remove-Item -Path $ripDir -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Log "INFO" "RAW-Verzeichnis gelöscht."
+            Write-Log "DEBUG" "RAW-Verzeichnis gelöscht."
 
             if ($isNetworkPath) {
                 # Kodierte Dateien vom TempDir auf OutputDir verschieben
-                Write-Log "INFO" "Verschiebe Dateien von '$localDir' nach '$finalDir' ..."
+                Write-Log "DEBUG" "Verschiebe Dateien von '$localDir' nach '$finalDir' ..."
                 if (-not (Test-Path $finalDir)) {
                     New-Item -ItemType Directory -Path $finalDir -Force | Out-Null
                 }
                 Get-ChildItem -Path $localDir -File | ForEach-Object {
                     Move-Item -Path $_.FullName -Destination $finalDir -Force
-                    Write-Log "INFO" "Verschoben: $($_.Name)"
+                    Write-Log "DEBUG" "Verschoben: $($_.Name)"
                 }
                 $tempFolderPath = Join-Path $TempDir $folderName
                 Remove-Item -Path $tempFolderPath -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Log "INFO" "TempDir bereinigt."
+                Write-Log "DEBUG" "TempDir bereinigt."
             }
         }
     } else {
@@ -1023,7 +1113,7 @@ function Invoke-SingleImport {
     $elapsedStr = "{0:hh\:mm\:ss}" -f $elapsed
 
     if ($Script:ExitCode -eq 0) {
-        $finalMsg = "ERFOLG - Import beendet nach $elapsedStr. Log: $Script:LogPath"
+        $finalMsg = "ERFOLG - '$Script:LastDiscTitle' beendet nach $elapsedStr. Log: $Script:LogPath"
         Write-Log "INFO" $finalMsg
         Write-Host $finalMsg -ForegroundColor Green
         if (-not $NoEject) { Eject-Disc -DriveLetter $Script:DriveLetter }
@@ -1043,6 +1133,9 @@ function Start-ServiceLoop {
     Write-Host "=== DVDRip v$Script:Version Service-Modus gestartet ===" -ForegroundColor Cyan
     Write-Log "INFO" "[Service] DVDRip v$Script:Version - Service-Modus aktiv. PollInterval: $PollInterval Min."
     Send-TelegramMessage "DVDRip v$Script:Version Service gestartet."
+
+    # Ausstehende Kodierungen aus dem letzten Lauf vor dem Warten aufarbeiten
+    Invoke-PendingEncodes
 
     while ($true) {
         # Auf Disc warten – gibt den Index des bereiten Laufwerks zurück
